@@ -99,6 +99,33 @@ app.get("/ideas", async (req, res) => {
   }
 });
 
+app.get("/ideas/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const idea = await ideasCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!idea) {
+      return res.status(404).json({
+        success: false,
+        message: "Idea not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: idea,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 // GET 6 ideas (home page)
 app.get("/idea", async (req, res) => {
   try {
