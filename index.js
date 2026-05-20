@@ -134,7 +134,7 @@ app.patch("/ideas/:id", async (req, res) => {
   try {
     const result = await ideasCollection.updateOne(
       { _id: new ObjectId(req.params.id) },
-      { $set: req.body }
+      { $set: req.body },
     );
 
     res.json({
@@ -165,6 +165,47 @@ app.delete("/ideas/:id", async (req, res) => {
   }
 });
 
+/*======================
+interaction
+====================*/
+app.get("/my-interactions/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const ideas = await ideasCollection
+      .find({
+        "comments.userId": userId,
+      })
+      .toArray();
+
+    const interactions = [];
+
+    ideas.forEach((idea) => {
+      idea.comments?.forEach((comment) => {
+        if (comment.userId === userId) {
+          interactions.push({
+            ideaId: idea._id,
+            ideaTitle: idea.title,
+            ideaImage: idea.image,
+            comment: comment.text,
+            createdAt: comment.createdAt,
+          });
+        }
+      });
+    });
+
+    res.json({
+      success: true,
+      data: interactions,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 /* ======================
    COMMENTS SYSTEM
 ====================== */
@@ -182,7 +223,7 @@ app.post("/ideas/:id/comments", async (req, res) => {
 
     await ideasCollection.updateOne(
       { _id: new ObjectId(req.params.id) },
-      { $push: { comments: comment } }
+      { $push: { comments: comment } },
     );
 
     res.json({ success: true, data: comment });
@@ -203,7 +244,7 @@ app.patch("/ideas/:ideaId/comments/:commentId", async (req, res) => {
         $set: {
           "comments.$.text": req.body.text,
         },
-      }
+      },
     );
 
     res.json({ success: true, message: "Comment updated" });
@@ -221,7 +262,7 @@ app.delete("/ideas/:ideaId/comments/:commentId", async (req, res) => {
         $pull: {
           comments: { _id: new ObjectId(req.params.commentId) },
         },
-      }
+      },
     );
 
     res.json({ success: true, message: "Comment deleted" });
@@ -257,7 +298,7 @@ app.patch("/profile/:id", async (req, res) => {
           ...req.body,
           updatedAt: new Date(),
         },
-      }
+      },
     );
 
     res.json({
@@ -274,10 +315,7 @@ app.patch("/profile/:id", async (req, res) => {
 ====================== */
 app.get("/idea", async (req, res) => {
   try {
-    const ideas = await ideasCollection
-      .find()
-      .limit(6)
-      .toArray();
+    const ideas = await ideasCollection.find().limit(6).toArray();
 
     res.json({ success: true, data: ideas });
   } catch (error) {
