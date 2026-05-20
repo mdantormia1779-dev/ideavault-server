@@ -24,7 +24,7 @@ const client = new MongoClient(uri, {
 });
 
 let ideasCollection;
-let usersCollection; 
+let usersCollection;
 
 // connect DB
 async function run() {
@@ -34,7 +34,7 @@ async function run() {
     const db = client.db("idea_vault");
 
     ideasCollection = db.collection("ideas");
-    usersCollection = db.collection("user"); 
+    usersCollection = db.collection("user");
 
     console.log("✅ MongoDB connected successfully");
   } catch (error) {
@@ -45,44 +45,37 @@ async function run() {
 run();
 
 /* ======================
-   ROOT ROUTE
+   ROOT
 ====================== */
 app.get("/", (req, res) => {
   res.send("IdeaVault server is running...");
 });
 
 /* ======================
-   IDEA APIs
+   IDEAS API
 ====================== */
 
-// POST idea
+// CREATE IDEA
 app.post("/ideas", async (req, res) => {
   try {
     const idea = req.body;
 
-    if (!idea) {
-      return res.status(400).json({
-        success: false,
-        message: "No data provided",
-      });
-    }
-
-    const result = await ideasCollection.insertOne(idea);
+    const result = await ideasCollection.insertOne({
+      ...idea,
+      createdAt: new Date(),
+    });
 
     res.status(201).json({
       success: true,
-      message: "Idea saved successfully",
+      message: "Idea created",
       data: result,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// GET all ideas
+// GET ALL IDEAS
 app.get("/ideas", async (req, res) => {
   try {
     const ideas = await ideasCollection.find().toArray();
@@ -92,19 +85,15 @@ app.get("/ideas", async (req, res) => {
       data: ideas,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
+// GET SINGLE IDEA
 app.get("/ideas/:id", async (req, res) => {
   try {
-    const id = req.params.id;
-
     const idea = await ideasCollection.findOne({
-      _id: new ObjectId(id),
+      _id: new ObjectId(req.params.id),
     });
 
     if (!idea) {
@@ -119,119 +108,186 @@ app.get("/ideas/:id", async (req, res) => {
       data: idea,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-});
-
-// GET 6 ideas (home page)
-app.get("/idea", async (req, res) => {
-  try {
-    const pipeline = [{ $limit: 6 }];
-
-    const ideas = await ideasCollection.aggregate(pipeline).toArray();
-
-    res.json({
-      success: true,
-      data: ideas,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
 /* ======================
-   PROFILE APIs
+   MY IDEAS (IMPORTANT)
 ====================== */
-
-// PATCH → update profile
-app.patch("/profile/:id", async (req, res) => {
+app.get("/my-ideas/:userId", async (req, res) => {
   try {
-    const id = req.params.id;
-    const { name, email, image } = req.body;
+    const ideas = await ideasCollection
+      .find({ userId: req.params.userId })
+      .toArray();
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid User ID",
-      });
-    }
+    res.json({ success: true, data: ideas });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
-    const updateDoc = {
-      $set: {
-        name,
-        email,
-        image,
-        updatedAt: new Date(),
-      },
-    };
-
-    const result = await usersCollection.updateOne(
-      { _id: new ObjectId(id) },
-      updateDoc
+/* ======================
+   UPDATE IDEA
+====================== */
+app.patch("/ideas/:id", async (req, res) => {
+  try {
+    const result = await ideasCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: req.body }
     );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
 
     res.json({
       success: true,
-      message: "Profile updated successfully",
+      message: "Idea updated",
       data: result,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// GET → single user profile
-app.get("/profile/:id", async (req, res) => {
+/* ======================
+   DELETE IDEA
+====================== */
+app.delete("/ideas/:id", async (req, res) => {
   try {
-    const id = req.params.id;
-
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid User ID",
-      });
-    }
-
-    const user = await usersCollection.findOne({
-      _id: new ObjectId(id),
+    await ideasCollection.deleteOne({
+      _id: new ObjectId(req.params.id),
     });
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
 
     res.json({
       success: true,
-      data: user,
+      message: "Idea deleted",
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
+/* ======================
+   COMMENTS SYSTEM
+====================== */
 
+// ADD COMMENT
+app.post("/ideas/:id/comments", async (req, res) => {
+  try {
+    const comment = {
+      _id: new ObjectId(),
+      userId: req.body.userId,
+      userName: req.body.userName,
+      text: req.body.text,
+      createdAt: new Date(),
+    };
+
+    await ideasCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $push: { comments: comment } }
+    );
+
+    res.json({ success: true, data: comment });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// UPDATE COMMENT
+app.patch("/ideas/:ideaId/comments/:commentId", async (req, res) => {
+  try {
+    await ideasCollection.updateOne(
+      {
+        _id: new ObjectId(req.params.ideaId),
+        "comments._id": new ObjectId(req.params.commentId),
+      },
+      {
+        $set: {
+          "comments.$.text": req.body.text,
+        },
+      }
+    );
+
+    res.json({ success: true, message: "Comment updated" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE COMMENT
+app.delete("/ideas/:ideaId/comments/:commentId", async (req, res) => {
+  try {
+    await ideasCollection.updateOne(
+      { _id: new ObjectId(req.params.ideaId) },
+      {
+        $pull: {
+          comments: { _id: new ObjectId(req.params.commentId) },
+        },
+      }
+    );
+
+    res.json({ success: true, message: "Comment deleted" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/* ======================
+   PROFILE API
+====================== */
+
+// GET PROFILE
+app.get("/profile/:id", async (req, res) => {
+  try {
+    const user = await usersCollection.findOne({
+      _id: new ObjectId(req.params.id),
+    });
+
+    res.json({ success: true, data: user });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// UPDATE PROFILE
+app.patch("/profile/:id", async (req, res) => {
+  try {
+    await usersCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      {
+        $set: {
+          ...req.body,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    res.json({
+      success: true,
+      message: "Profile updated",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/* ======================
+   HOME (LIMIT 6 IDEAS)
+====================== */
+app.get("/idea", async (req, res) => {
+  try {
+    const ideas = await ideasCollection
+      .find()
+      .limit(6)
+      .toArray();
+
+    res.json({ success: true, data: ideas });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/* ======================
+   SERVER START
+====================== */
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });
