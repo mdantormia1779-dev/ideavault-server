@@ -9,9 +9,8 @@ const app = express();
 app.use(express.json());
 
 /* ======================
-   CORS
+   CORS CONFIGURATION
 ====================== */
-
 app.use(
   cors({
     origin: "*",
@@ -19,35 +18,33 @@ app.use(
 );
 
 /* ======================
-   MONGO DB
+   MONGO DB & SERVERLESS CONNECTION
 ====================== */
-
 const uri = process.env.DB_URI;
 
 if (!uri) {
-  throw new Error("DB_URI missing");
+  throw new Error("DB_URI missing in Environment Variables");
 }
 
 const client = new MongoClient(uri);
+let cachedDb = null; 
 
-let db;
-
-async function connectDB() {
+async function getDB() {
+ 
+  if (cachedDb) {
+    return cachedDb;
+  }
+  
+  
   await client.connect();
-  db = client.db("idea_vault");
-  console.log("MongoDB Connected");
+  cachedDb = client.db("idea_vault");
+  console.log("MongoDB Connected Successfully");
+  return cachedDb;
 }
-
-connectDB();
 
 /* ======================
    HELPERS
 ====================== */
-
-function getDB() {
-  return db;
-}
-
 function toObjectId(id) {
   try {
     return new ObjectId(id);
@@ -57,13 +54,12 @@ function toObjectId(id) {
 }
 
 /* ======================
-   ROOT
+   ROOT ROUTE
 ====================== */
-
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "🚀 IdeaVault API Running",
+    message: "🚀 IdeaVault API Running Successfully",
   });
 });
 
@@ -71,48 +67,52 @@ app.get("/", (req, res) => {
    IDEAS ROUTES
 ====================== */
 
-// GET ALL IDEAS
+// ১. GET ALL IDEAS
 app.get("/ideas", async (req, res) => {
   try {
-    const db = getDB();
+    const db = await getDB(); 
     const ideas = await db.collection("ideas").find().toArray();
     res.json({ success: true, data: ideas });
-  } catch {
-    res.status(500).json({ success: false });
+  } catch (error) {
+    console.error("Error in GET /ideas:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// LIMIT 6 IDEAS
+// ২. LIMIT 6 IDEAS 
 app.get("/ideas/limit", async (req, res) => {
   try {
-    const db = getDB();
+    const db = await getDB();
     const ideas = await db.collection("ideas").find().limit(6).toArray();
     res.json({ success: true, data: ideas });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ success: false });
+    console.error("Error in GET /ideas/limit:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
-// SINGLE IDEA
+
+// ৩. SINGLE IDEA 
 app.get("/ideas/:id", async (req, res) => {
   try {
-    const db = getDB();
+    const db = await getDB();
     const id = toObjectId(req.params.id);
 
-    if (!id) return res.status(400).json({ message: "Invalid ID" });
+    if (!id) return res.status(400).json({ message: "Invalid ID Format" });
 
     const idea = await db.collection("ideas").findOne({ _id: id });
+    if (!idea) return res.status(404).json({ success: false, message: "Idea not found" });
 
     res.json({ success: true, data: idea });
-  } catch {
-    res.status(500).json({ success: false });
+  } catch (error) {
+    console.error("Error in GET /ideas/:id:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// CREATE IDEA
+// ৪. CREATE IDEA
 app.post("/ideas", async (req, res) => {
   try {
-    const db = getDB();
+    const db = await getDB();
 
     const result = await db.collection("ideas").insertOne({
       ...req.body,
@@ -120,55 +120,57 @@ app.post("/ideas", async (req, res) => {
     });
 
     res.json({ success: true, data: result });
-  } catch {
-    res.status(500).json({ success: false });
+  } catch (error) {
+    console.error("Error in POST /ideas:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// UPDATE IDEA
+// ৫. UPDATE IDEA
 app.patch("/ideas/:id", async (req, res) => {
   try {
-    const db = getDB();
+    const db = await getDB();
     const id = toObjectId(req.params.id);
 
-    if (!id) return res.status(400).json({ message: "Invalid ID" });
+    if (!id) return res.status(400).json({ message: "Invalid ID Format" });
 
     const result = await db
       .collection("ideas")
       .updateOne({ _id: id }, { $set: req.body });
 
     res.json({ success: true, data: result });
-  } catch {
-    res.status(500).json({ success: false });
+  } catch (error) {
+    console.error("Error in PATCH /ideas/:id:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// DELETE IDEA
+// ৬. DELETE IDEA
 app.delete("/ideas/:id", async (req, res) => {
   try {
-    const db = getDB();
+    const db = await getDB();
     const id = toObjectId(req.params.id);
 
-    if (!id) return res.status(400).json({ message: "Invalid ID" });
+    if (!id) return res.status(400).json({ message: "Invalid ID Format" });
 
     const result = await db.collection("ideas").deleteOne({ _id: id });
 
     res.json({ success: true, data: result });
-  } catch {
-    res.status(500).json({ success: false });
+  } catch (error) {
+    console.error("Error in DELETE /ideas/:id:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /* ======================
-   COMMENTS
+   COMMENTS ROUTE
 ====================== */
-
 app.post("/ideas/:id/comments", async (req, res) => {
   try {
-    const db = getDB();
+    const db = await getDB();
     const id = toObjectId(req.params.id);
 
-    if (!id) return res.status(400).json({ message: "Invalid ID" });
+    if (!id) return res.status(400).json({ message: "Invalid ID Format" });
 
     const comment = {
       _id: new ObjectId(),
@@ -184,18 +186,18 @@ app.post("/ideas/:id/comments", async (req, res) => {
     );
 
     res.json({ success: true, data: comment });
-  } catch {
-    res.status(500).json({ success: false });
+  } catch (error) {
+    console.error("Error in POST /comments:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /* ======================
-   MY IDEAS
+   MY IDEAS ROUTE
 ====================== */
-
 app.get("/my-ideas/:userId", async (req, res) => {
   try {
-    const db = getDB();
+    const db = await getDB();
 
     const ideas = await db
       .collection("ideas")
@@ -203,34 +205,34 @@ app.get("/my-ideas/:userId", async (req, res) => {
       .toArray();
 
     res.json({ success: true, data: ideas });
-  } catch {
-    res.status(500).json({ success: false });
+  } catch (error) {
+    console.error("Error in GET /my-ideas:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /* ======================
-   PROFILE
+   PROFILE ROUTE
 ====================== */
-
 app.get("/profile/:id", async (req, res) => {
   try {
-    const db = getDB();
+    const db = await getDB();
     const id = toObjectId(req.params.id);
 
-    if (!id) return res.status(400).json({ message: "Invalid ID" });
+    if (!id) return res.status(400).json({ message: "Invalid ID Format" });
 
     const user = await db.collection("users").findOne({ _id: id });
 
     res.json({ success: true, data: user });
-  } catch {
-    res.status(500).json({ success: false });
+  } catch (error) {
+    console.error("Error in GET /profile:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /* ======================
    START SERVER
 ====================== */
-
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
