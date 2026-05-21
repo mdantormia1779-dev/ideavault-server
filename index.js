@@ -30,12 +30,9 @@ const client = new MongoClient(uri);
 let cachedDb = null; 
 
 async function getDB() {
- 
   if (cachedDb) {
     return cachedDb;
   }
-  
-  
   await client.connect();
   cachedDb = client.db("idea_vault");
   console.log("MongoDB Connected Successfully");
@@ -113,12 +110,10 @@ app.get("/ideas/:id", async (req, res) => {
 app.post("/ideas", async (req, res) => {
   try {
     const db = await getDB();
-
     const result = await db.collection("ideas").insertOne({
       ...req.body,
       createdAt: new Date(),
     });
-
     res.json({ success: true, data: result });
   } catch (error) {
     console.error("Error in POST /ideas:", error);
@@ -165,6 +160,8 @@ app.delete("/ideas/:id", async (req, res) => {
 /* ======================
    COMMENTS ROUTE
 ====================== */
+
+// ১. CREATE COMMENT
 app.post("/ideas/:id/comments", async (req, res) => {
   try {
     const db = await getDB();
@@ -192,13 +189,62 @@ app.post("/ideas/:id/comments", async (req, res) => {
   }
 });
 
+// ২. UPDATE COMMENT
+app.patch("/ideas/:id/comments/:commentId", async (req, res) => {
+  try {
+    const db = await getDB();
+    const ideaId = toObjectId(req.params.id);
+    const commentId = toObjectId(req.params.commentId);
+
+    if (!ideaId || !commentId) {
+      return res.status(400).json({ success: false, message: "Invalid ID Format" });
+    }
+
+    const result = await db.collection("ideas").updateOne(
+      { _id: ideaId, "comments._id": commentId },
+      { $set: { "comments.$.text": req.body.text } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: "Comment not found" });
+    }
+
+    res.json({ success: true, message: "Comment updated successfully" });
+  } catch (error) {
+    console.error("Error in PATCH /comments:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ৩. DELETE COMMENT
+app.delete("/ideas/:id/comments/:commentId", async (req, res) => {
+  try {
+    const db = await getDB();
+    const ideaId = toObjectId(req.params.id);
+    const commentId = toObjectId(req.params.commentId);
+
+    if (!ideaId || !commentId) {
+      return res.status(400).json({ success: false, message: "Invalid ID Format" });
+    }
+
+    const result = await db.collection("ideas").updateOne(
+      { _id: ideaId },
+      { $pull: { comments: { _id: commentId } } }
+    );
+
+    res.json({ success: true, message: "Comment deleted successfully" });
+  } catch (error) {
+    console.error("Error in DELETE /comments:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 /* ======================
    MY IDEAS ROUTE
 ====================== */
 app.get("/my-ideas/:userId", async (req, res) => {
   try {
     const db = await getDB();
-
     const ideas = await db
       .collection("ideas")
       .find({ userId: req.params.userId })
@@ -207,6 +253,105 @@ app.get("/my-ideas/:userId", async (req, res) => {
     res.json({ success: true, data: ideas });
   } catch (error) {
     console.error("Error in GET /my-ideas:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/* ======================
+   INTERACTIONS ROUTE
+====================== */
+
+// ১. GET USER INTERACTIONS
+app.get("/my-interactions/:userId", async (req, res) => {
+  try {
+    const db = await getDB();
+    const userId = req.params.userId;
+
+    const pipeline = [
+      { $match: { "comments.userId": userId } },
+      { $unwind: "$comments" },
+      { $match: { "comments.userId": userId } },
+      {
+        $project: {
+          _id: 0,
+          ideaId: "$_id",
+          ideaTitle: "$title", 
+          ideaImage: "$image", 
+          commentId: "$comments._id",
+          commentText: "$comments.text",
+          createdAt: "$comments.createdAt"
+        }
+      }
+    ];
+
+    const interactions = await db.collection("ideas").aggregate(pipeline).toArray();
+    res.json({ success: true, data: interactions });
+  } catch (error) {
+    console.error("Error in GET /my-interactions:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/* ======================
+   SAVE / FAVORITE IDEAS ROUTE
+====================== */
+
+// ১. SAVE AN IDEA
+app.post("/saved-ideas", async (req, res) => {
+  try {
+    const db = await getDB();
+    const { userId, ideaId, ideaTitle, ideaImage } = req.body;
+
+    if (!userId || !ideaId) {
+      return res.status(400).json({ success: false, message: "UserId and IdeaId are required" });
+    }
+
+    const existing = await db.collection("saved_ideas").findOne({ userId, ideaId });
+    if (existing) {
+      return res.status(400).json({ success: false, message: "Idea already saved" });
+    }
+
+    const result = await db.collection("saved_ideas").insertOne({
+      userId,
+      ideaId,
+      ideaTitle,
+      ideaImage,
+      savedAt: new Date()
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error("Error in POST /saved-ideas:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ২. GET ALL SAVED IDEAS BY USER
+app.get("/saved-ideas/:userId", async (req, res) => {
+  try {
+    const db = await getDB();
+    const saved = await db
+      .collection("saved_ideas")
+      .find({ userId: req.params.userId })
+      .toArray();
+
+    res.json({ success: true, data: saved });
+  } catch (error) {
+    console.error("Error in GET /saved-ideas:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ৩. REMOVE SAVED IDEA
+app.delete("/saved-ideas/:userId/:ideaId", async (req, res) => {
+  try {
+    const db = await getDB();
+    const { userId, ideaId } = req.params;
+
+    const result = await db.collection("saved_ideas").deleteOne({ userId, ideaId });
+    res.json({ success: true, message: "Idea removed from saved list", data: result });
+  } catch (error) {
+    console.error("Error in DELETE /saved-ideas:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -222,7 +367,6 @@ app.get("/profile/:id", async (req, res) => {
     if (!id) return res.status(400).json({ message: "Invalid ID Format" });
 
     const user = await db.collection("users").findOne({ _id: id });
-
     res.json({ success: true, data: user });
   } catch (error) {
     console.error("Error in GET /profile:", error);
