@@ -1,7 +1,7 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import { MongoClient, ObjectId, ServerApiVersion } from "mongodb";
+const express = require("express");
+const cors = require("cors");
+const dotenv = require("dotenv");
+const { MongoClient, ObjectId } = require("mongodb");
 
 dotenv.config();
 
@@ -9,53 +9,52 @@ const app = express();
 app.use(express.json());
 
 /* ======================
-   CORS (PRODUCTION SAFE)
+   CORS
 ====================== */
 
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      "https://ideavault-client-tawny.vercel.app",
-    ],
-    credentials: true,
+    origin: "*",
   })
 );
 
 /* ======================
-   MONGO CONNECTION (SAFE SINGLETON)
+   MONGO DB
 ====================== */
 
 const uri = process.env.DB_URI;
 
-if (!uri) throw new Error("DB_URI missing");
-
-let client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: false,
-    deprecationErrors: false,
-  },
-});
-
-let clientPromise = client.connect();
-
-async function getDB() {
-  const connectedClient = await clientPromise;
-  return connectedClient.db("idea_vault");
+if (!uri) {
+  throw new Error("DB_URI missing");
 }
 
+const client = new MongoClient(uri);
+
+let db;
+
+async function connectDB() {
+  await client.connect();
+  db = client.db("idea_vault");
+  console.log("MongoDB Connected");
+}
+
+connectDB();
+
 /* ======================
-   HELPER
+   HELPERS
 ====================== */
 
-const toObjectId = (id) => {
+function getDB() {
+  return db;
+}
+
+function toObjectId(id) {
   try {
     return new ObjectId(id);
   } catch {
     return null;
   }
-};
+}
 
 /* ======================
    ROOT
@@ -75,7 +74,7 @@ app.get("/", (req, res) => {
 // GET ALL IDEAS
 app.get("/ideas", async (req, res) => {
   try {
-    const db = await getDB();
+    const db = getDB();
     const ideas = await db.collection("ideas").find().toArray();
     res.json({ success: true, data: ideas });
   } catch {
@@ -86,7 +85,7 @@ app.get("/ideas", async (req, res) => {
 // LIMIT 6 IDEAS
 app.get("/ideas/limit", async (req, res) => {
   try {
-    const db = await getDB();
+    const db = getDB();
     const ideas = await db.collection("ideas").find().limit(6).toArray();
     res.json({ success: true, data: ideas });
   } catch {
@@ -97,7 +96,7 @@ app.get("/ideas/limit", async (req, res) => {
 // SINGLE IDEA
 app.get("/ideas/:id", async (req, res) => {
   try {
-    const db = await getDB();
+    const db = getDB();
     const id = toObjectId(req.params.id);
 
     if (!id) return res.status(400).json({ message: "Invalid ID" });
@@ -113,7 +112,7 @@ app.get("/ideas/:id", async (req, res) => {
 // CREATE IDEA
 app.post("/ideas", async (req, res) => {
   try {
-    const db = await getDB();
+    const db = getDB();
 
     const result = await db.collection("ideas").insertOne({
       ...req.body,
@@ -129,7 +128,7 @@ app.post("/ideas", async (req, res) => {
 // UPDATE IDEA
 app.patch("/ideas/:id", async (req, res) => {
   try {
-    const db = await getDB();
+    const db = getDB();
     const id = toObjectId(req.params.id);
 
     if (!id) return res.status(400).json({ message: "Invalid ID" });
@@ -147,7 +146,7 @@ app.patch("/ideas/:id", async (req, res) => {
 // DELETE IDEA
 app.delete("/ideas/:id", async (req, res) => {
   try {
-    const db = await getDB();
+    const db = getDB();
     const id = toObjectId(req.params.id);
 
     if (!id) return res.status(400).json({ message: "Invalid ID" });
@@ -166,7 +165,7 @@ app.delete("/ideas/:id", async (req, res) => {
 
 app.post("/ideas/:id/comments", async (req, res) => {
   try {
-    const db = await getDB();
+    const db = getDB();
     const id = toObjectId(req.params.id);
 
     if (!id) return res.status(400).json({ message: "Invalid ID" });
@@ -196,7 +195,7 @@ app.post("/ideas/:id/comments", async (req, res) => {
 
 app.get("/my-ideas/:userId", async (req, res) => {
   try {
-    const db = await getDB();
+    const db = getDB();
 
     const ideas = await db
       .collection("ideas")
@@ -215,7 +214,7 @@ app.get("/my-ideas/:userId", async (req, res) => {
 
 app.get("/profile/:id", async (req, res) => {
   try {
-    const db = await getDB();
+    const db = getDB();
     const id = toObjectId(req.params.id);
 
     if (!id) return res.status(400).json({ message: "Invalid ID" });
