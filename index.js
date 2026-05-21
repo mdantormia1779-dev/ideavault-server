@@ -8,7 +8,15 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-
+app.use(
+  cors({
+    origin: [
+      "http://localhost:3000",
+      "https://ideavault-client-tawny.vercel.app/",
+    ],
+    credentials: true,
+  }),
+);
 /* ======================
    MONGO DB
 ====================== */
@@ -169,10 +177,9 @@ app.post("/ideas/:id/comments", async (req, res) => {
       createdAt: new Date(),
     };
 
-    await db.collection("ideas").updateOne(
-      { _id: id },
-      { $push: { comments: comment } }
-    );
+    await db
+      .collection("ideas")
+      .updateOne({ _id: id }, { $push: { comments: comment } });
 
     res.json({ success: true, data: comment });
   } catch {
