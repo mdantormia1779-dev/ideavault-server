@@ -5,50 +5,53 @@ const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const app = express();
-const port = 5000;
+const port = process.env.PORT || 5000;
 
-// middleware
-app.use(cors());
+// ✅ CORS (FIXED)
+app.use(
+  cors({
+    origin: [
+      "http://localhost:3000",
+      "https://ideavault-client-nu.vercel.app",
+    ],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
-// env
+// ✅ MongoDB URI
 const uri = process.env.DB_URI;
 
-// MongoDB client
-const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  },
-});
+// ✅ GLOBAL CLIENT (FIXED)
+let client;
+let clientPromise;
 
-let ideasCollection;
-let usersCollection;
+if (!global._mongoClientPromise) {
+  client = new MongoClient(uri, {
+    serverApi: {
+      version: ServerApiVersion.v1,
+      strict: true,
+      deprecationErrors: true,
+    },
+  });
 
-// connect DB
-async function run() {
-  try {
-    await client.connect();
-
-    const db = client.db("idea_vault");
-
-    ideasCollection = db.collection("ideas");
-    usersCollection = db.collection("user");
-
-    console.log("✅ MongoDB connected successfully");
-  } catch (error) {
-    console.error("DB connection error:", error);
-  }
+  global._mongoClientPromise = client.connect();
 }
 
-run();
+clientPromise = global._mongoClientPromise;
+
+// ✅ DB HELPER
+async function getDB() {
+  const client = await clientPromise;
+  return client.db("idea_vault");
+}
 
 /* ======================
    ROOT
 ====================== */
 app.get("/", (req, res) => {
-  res.send("IdeaVault server is running...");
+  res.send("🚀 IdeaVault server is running...");
 });
 
 /* ======================
@@ -58,18 +61,14 @@ app.get("/", (req, res) => {
 // CREATE IDEA
 app.post("/ideas", async (req, res) => {
   try {
-    const idea = req.body;
+    const db = await getDB();
 
-    const result = await ideasCollection.insertOne({
-      ...idea,
+    const result = await db.collection("ideas").insertOne({
+      ...req.body,
       createdAt: new Date(),
     });
 
-    res.status(201).json({
-      success: true,
-      message: "Idea created",
-      data: result,
-    });
+    res.status(201).json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -78,12 +77,11 @@ app.post("/ideas", async (req, res) => {
 // GET ALL IDEAS
 app.get("/ideas", async (req, res) => {
   try {
-    const ideas = await ideasCollection.find().toArray();
+    const db = await getDB();
 
-    res.json({
-      success: true,
-      data: ideas,
-    });
+    const ideas = await db.collection("ideas").find().toArray();
+
+    res.json({ success: true, data: ideas });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -92,32 +90,25 @@ app.get("/ideas", async (req, res) => {
 // GET SINGLE IDEA
 app.get("/ideas/:id", async (req, res) => {
   try {
-    const idea = await ideasCollection.findOne({
+    const db = await getDB();
+
+    const idea = await db.collection("ideas").findOne({
       _id: new ObjectId(req.params.id),
     });
 
-    if (!idea) {
-      return res.status(404).json({
-        success: false,
-        message: "Idea not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      data: idea,
-    });
+    res.json({ success: true, data: idea });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-/* ======================
-   MY IDEAS (IMPORTANT)
-====================== */
+// MY IDEAS
 app.get("/my-ideas/:userId", async (req, res) => {
   try {
-    const ideas = await ideasCollection
+    const db = await getDB();
+
+    const ideas = await db
+      .collection("ideas")
       .find({ userId: req.params.userId })
       .toArray();
 
@@ -127,103 +118,54 @@ app.get("/my-ideas/:userId", async (req, res) => {
   }
 });
 
-/* ======================
-   UPDATE IDEA
-====================== */
+// UPDATE IDEA
 app.patch("/ideas/:id", async (req, res) => {
   try {
-    const result = await ideasCollection.updateOne(
+    const db = await getDB();
+
+    const result = await db.collection("ideas").updateOne(
       { _id: new ObjectId(req.params.id) },
-      { $set: req.body },
+      { $set: req.body }
     );
 
-    res.json({
-      success: true,
-      message: "Idea updated",
-      data: result,
-    });
+    res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-/* ======================
-   DELETE IDEA
-====================== */
+// DELETE IDEA
 app.delete("/ideas/:id", async (req, res) => {
   try {
-    await ideasCollection.deleteOne({
+    const db = await getDB();
+
+    await db.collection("ideas").deleteOne({
       _id: new ObjectId(req.params.id),
     });
 
-    res.json({
-      success: true,
-      message: "Idea deleted",
-    });
+    res.json({ success: true, message: "Deleted" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-/*======================
-interaction
-====================*/
-app.get("/my-interactions/:userId", async (req, res) => {
-  try {
-    const { userId } = req.params;
-
-    const ideas = await ideasCollection
-      .find({
-        "comments.userId": userId,
-      })
-      .toArray();
-
-    const interactions = [];
-
-    ideas.forEach((idea) => {
-      idea.comments?.forEach((comment) => {
-        if (comment.userId === userId) {
-          interactions.push({
-            ideaId: idea._id,
-            ideaTitle: idea.title,
-            ideaImage: idea.image,
-            comment: comment.text,
-            createdAt: comment.createdAt,
-          });
-        }
-      });
-    });
-
-    res.json({
-      success: true,
-      data: interactions,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-});
-
 /* ======================
-   COMMENTS SYSTEM
+   COMMENTS
 ====================== */
 
-// ADD COMMENT
 app.post("/ideas/:id/comments", async (req, res) => {
   try {
+    const db = await getDB();
+
     const comment = {
       _id: new ObjectId(),
-      userId: req.body.userId,
-      userName: req.body.userName,
-      text: req.body.text,
+      ...req.body,
       createdAt: new Date(),
     };
 
-    await ideasCollection.updateOne(
+    await db.collection("ideas").updateOne(
       { _id: new ObjectId(req.params.id) },
-      { $push: { comments: comment } },
+      { $push: { comments: comment } }
     );
 
     res.json({ success: true, data: comment });
@@ -232,53 +174,15 @@ app.post("/ideas/:id/comments", async (req, res) => {
   }
 });
 
-// UPDATE COMMENT
-app.patch("/ideas/:ideaId/comments/:commentId", async (req, res) => {
-  try {
-    await ideasCollection.updateOne(
-      {
-        _id: new ObjectId(req.params.ideaId),
-        "comments._id": new ObjectId(req.params.commentId),
-      },
-      {
-        $set: {
-          "comments.$.text": req.body.text,
-        },
-      },
-    );
-
-    res.json({ success: true, message: "Comment updated" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// DELETE COMMENT
-app.delete("/ideas/:ideaId/comments/:commentId", async (req, res) => {
-  try {
-    await ideasCollection.updateOne(
-      { _id: new ObjectId(req.params.ideaId) },
-      {
-        $pull: {
-          comments: { _id: new ObjectId(req.params.commentId) },
-        },
-      },
-    );
-
-    res.json({ success: true, message: "Comment deleted" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
 /* ======================
-   PROFILE API
+   PROFILE
 ====================== */
 
-// GET PROFILE
 app.get("/profile/:id", async (req, res) => {
   try {
-    const user = await usersCollection.findOne({
+    const db = await getDB();
+
+    const user = await db.collection("users").findOne({
       _id: new ObjectId(req.params.id),
     });
 
@@ -288,34 +192,15 @@ app.get("/profile/:id", async (req, res) => {
   }
 });
 
-// UPDATE PROFILE
-app.patch("/profile/:id", async (req, res) => {
-  try {
-    await usersCollection.updateOne(
-      { _id: new ObjectId(req.params.id) },
-      {
-        $set: {
-          ...req.body,
-          updatedAt: new Date(),
-        },
-      },
-    );
-
-    res.json({
-      success: true,
-      message: "Profile updated",
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
 /* ======================
-   HOME (LIMIT 6 IDEAS)
+   HOME LIMIT
 ====================== */
+
 app.get("/idea", async (req, res) => {
   try {
-    const ideas = await ideasCollection.find().limit(6).toArray();
+    const db = await getDB();
+
+    const ideas = await db.collection("ideas").find().limit(6).toArray();
 
     res.json({ success: true, data: ideas });
   } catch (error) {
@@ -323,6 +208,7 @@ app.get("/idea", async (req, res) => {
   }
 });
 
+/* ====================== */
 
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
