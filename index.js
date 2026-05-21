@@ -86,7 +86,7 @@ app.get("/ideas", async (req, res) => {
 app.get("/ideas/limit", async (req, res) => {
   try {
     const db = getDB();
-    const ideas = await db.collection("ideas").find().limit(6).toArray();
+    const ideas = await db.collection("idea").find().limit(6).toArray();
     res.json({ success: true, data: ideas });
   } catch {
     res.status(500).json({ success: false });
