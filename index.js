@@ -323,9 +323,7 @@ app.get("/idea", async (req, res) => {
   }
 });
 
-/* ======================
-   SERVER START
-====================== */
+
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });
