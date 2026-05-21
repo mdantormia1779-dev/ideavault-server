@@ -344,7 +344,9 @@ app.post("/saved-ideas", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-// ১. GET ALL IDEAS WITH SEARCH & FILTER (Fixed String to Date bug)
+
+
+// ১. GET ALL IDEAS WITH SEARCH & FILTER (Fixed: Missing createdAt Field Handling)
 app.get("/ideas", async (req, res) => {
   try {
     const db = await getDB();
@@ -353,38 +355,37 @@ app.get("/ideas", async (req, res) => {
     let query = {};
 
     // ১. TITLE SEARCH (Case-insensitive)
-    if (search) {
-      query.title = { $regex: search, $options: "i" };
+    if (search && search.trim() !== "") {
+      query.title = { $regex: search.trim(), $options: "i" };
     }
 
     // ২. CATEGORY FILTER
-    if (category) {
+    if (category && category !== "") {
       query.category = category;
     }
 
-    // ৩. DATE RANGE FILTER (ক্যালেন্ডার স্ট্রিং থেকে ডেট অবজেক্টে রূপান্তর নিশ্চিত করা হয়েছে)
+    // ৩. DATE RANGE FILTER (শুধু তখনই কোয়েরিতে যুক্ত হবে যখন ফ্রন্টএন্ড থেকে ডেট পাঠানো হবে)
     if (startDate || endDate) {
       query.createdAt = {};
       
       if (startDate) {
-        // ফ্রন্টএন্ডের "YYYY-MM-DD" কে MongoDB ডেট অবজেক্টে রূপান্তর
         const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0); // দিনের শুরু (00:00:00)
+        start.setHours(0, 0, 0, 0);
         query.createdAt.$gte = start;
       }
       
       if (endDate) {
-        // ফ্রন্টএন্ডের "YYYY-MM-DD" কে ঐ দিনের শেষ সময় পর্যন্ত ধরা হয়েছে
         const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999); // দিনের শেষ (23:59:59)
+        end.setHours(23, 59, 59, 999);
         query.createdAt.$lte = end;
       }
     }
 
+    // ডাটাবেজ থেকে ডাটা নিয়ে আসা হচ্ছে
     const ideas = await db
       .collection("ideas")
       .find(query)
-      .sort({ createdAt: -1 }) // নতুন আইডিয়াগুলো আগে আসবে
+      .sort({ _id: -1 }) // createdAt ফিল্ড না থাকলেও নতুন আইডিয়া আগে দেখানোর জন্য _id ব্যবহার করা হয়েছে
       .toArray();
 
     res.json({ success: true, count: ideas.length, data: ideas });
@@ -393,6 +394,7 @@ app.get("/ideas", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
 
 
 // ৩. REMOVE SAVED IDEA
