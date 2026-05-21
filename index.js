@@ -287,7 +287,7 @@ app.get("/my-interactions/:userId", async (req, res) => {
           ideaTitle: "$title",
           ideaImage: "$image",
           commentId: { $toString: "$comments._id" },
-          comment: "$comments.text", 
+          comment: "$comments.text",
           createdAt: "$comments.createdAt",
         },
       },
@@ -344,8 +344,6 @@ app.post("/saved-ideas", async (req, res) => {
   }
 });
 
-
-
 // ৩. REMOVE SAVED IDEA
 app.delete("/saved-ideas/:userId/:ideaId", async (req, res) => {
   try {
@@ -380,6 +378,45 @@ app.get("/profile/:id", async (req, res) => {
     res.json({ success: true, data: user });
   } catch (error) {
     console.error("Error in GET /profile:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+/* ======================
+   UPDATE PROFILE ROUTE
+====================== */
+app.patch("/profile/:id", async (req, res) => {
+  try {
+    const db = await getDB();
+    const id = toObjectId(req.params.id);
+
+    if (!id)
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid ID Format" });
+
+    const { name, image } = req.body;
+    let updateFields = {};
+
+    if (name) updateFields.name = name;
+    if (image) updateFields.image = image;
+
+    const result = await db
+      .collection("users")
+      .updateOne({ _id: id }, { $set: updateFields });
+
+    if (result.matchedCount === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    res.json({
+      success: true,
+      message: "Profile updated successfully",
+      data: updateFields,
+    });
+  } catch (error) {
+    console.error("Error in PATCH /profile:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
