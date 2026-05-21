@@ -364,87 +364,94 @@ app.delete("/saved-ideas/:userId/:ideaId", async (req, res) => {
   }
 });
 
-/* ======================
-   PROFILE ROUTE
-====================== */
 app.get("/profile/:id", async (req, res) => {
   try {
     const db = await getDB();
     const id = toObjectId(req.params.id);
 
-    if (!id) return res.status(400).json({ message: "Invalid ID Format" });
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ID Format",
+      });
+    }
 
     const user = await db.collection("users").findOne({ _id: id });
-    res.json({ success: true, data: user });
-  } catch (error) {
-    console.error("Error in GET /profile:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-/* ======================
-   🔥 ULTIMATE FIXED UPDATE PROFILE ROUTE (No more 400 or 404)
-====================== */
-app.patch("/profile/:id", async (req, res) => {
-  try {
-    const db = await getDB();
-    const rawId = req.params.id;
-    const queryEmail = req.query.email || req.body.email; // কুয়েরি বা বডি থেকে ইমেইল নেওয়া হচ্ছে
 
-    let query = {};
-
-    // ১. প্রথমে আইডি অবজেক্ট আইডি কিনা চেক করা (যাতে ৪00 এরর না আসে)
-    const mongoId = toObjectId(rawId);
-    if (mongoId) {
-      query = { _id: mongoId };
-    } else if (rawId && rawId !== "undefined" && !rawId.includes("@")) {
-      query = { $or: [{ id: rawId }, { userId: rawId }] };
-    } else if (queryEmail) {
-      // যদি আইডি ইনভ্যালিড হয় কিন্তু ইমেইল থাকে, তবে ইমেইল দিয়ে ম্যাচ করবে
-      query = { email: queryEmail };
-    } else {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Valid User ID or Email is required",
-        });
-    }
-
-    const { name, image } = req.body;
-    let updateFields = { updatedAt: new Date() };
-
-    if (name) updateFields.name = name;
-    if (image) updateFields.image = image;
-
-   
-    let result = await db
-      .collection("users")
-      .updateOne(query, { $set: updateFields });
-
-   
-    if (result.matchedCount === 0 && queryEmail) {
-      result = await db
-        .collection("users")
-        .updateOne({ email: queryEmail }, { $set: updateFields });
-    }
-
-    if (result.matchedCount === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found in database" });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
     }
 
     res.json({
       success: true,
+      data: user,
+    });
+  } catch (error) {
+    console.error("Error in GET /profile:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+app.patch("/profile/:id", async (req, res) => {
+  try {
+    const db = await getDB();
+    const id = toObjectId(req.params.id);
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ID Format",
+      });
+    }
+
+    const { name, image } = req.body;
+
+    if (!name && !image) {
+      return res.status(400).json({
+        success: false,
+        message: "Nothing to update",
+      });
+    }
+
+    const updateDoc = {
+      $set: {
+        ...(name && { name }),
+        ...(image && { image }),
+        updatedAt: new Date(),
+      },
+    };
+
+    const result = await db
+      .collection("users")
+      .updateOne({ _id: id }, updateDoc);
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const updatedUser = await db.collection("users").findOne({ _id: id });
+
+    res.json({
+      success: true,
       message: "Profile updated successfully 🎉",
-      data: updateFields,
+      data: updatedUser,
     });
   } catch (error) {
     console.error("Error in PATCH /profile:", error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
   }
 });
-
 /* ======================
    START SERVER
 ====================== */
