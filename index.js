@@ -1,14 +1,11 @@
-require("dotenv").config();
-
-const express = require("express");
-const cors = require("cors");
-const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+import express from "express";
+import cors from "cors";
+import { MongoClient, ServerApiVersion, ObjectId } from "mongodb";
 
 const app = express();
-const port = process.env.PORT || 5000;
 
 /* ======================
-   CORS (PRODUCTION FIXED)
+   CORS FIX (IMPORTANT)
 ====================== */
 const allowedOrigins = [
   "http://localhost:3000",
@@ -17,34 +14,26 @@ const allowedOrigins = [
 
 app.use(
   cors({
-    origin: (origin, callback) => {
-      // allow Postman / server-to-server
+    origin: function (origin, callback) {
       if (!origin) return callback(null, true);
-
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-
-      console.log("❌ CORS BLOCKED:", origin);
-      return callback(null, false);
+      return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
-    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   })
 );
-
-// IMPORTANT: preflight support
-app.options("*", cors());
 
 app.use(express.json());
 
 /* ======================
-   MONGODB SETUP (VERCEL SAFE)
+   MONGODB CONNECTION FIX
 ====================== */
 const uri = process.env.DB_URI;
 
 if (!uri) {
-  throw new Error("❌ DB_URI is missing in environment variables");
+  throw new Error("DB_URI is missing in environment variables");
 }
 
 let client;
@@ -64,51 +53,34 @@ if (!global._mongoClientPromise) {
 
 clientPromise = global._mongoClientPromise;
 
-/* ======================
-   DB HELPER
-====================== */
 async function getDB() {
   const client = await clientPromise;
   return client.db("idea_vault");
 }
 
 /* ======================
-   ROOT
+   HEALTH CHECK
 ====================== */
 app.get("/", (req, res) => {
-  res.send("🚀 IdeaVault API is running...");
+  res.json({
+    success: true,
+    message: "🚀 IdeaVault API is running",
+  });
 });
 
 /* ======================
    IDEAS API
 ====================== */
 
-// CREATE IDEA
-app.post("/ideas", async (req, res) => {
-  try {
-    const db = await getDB();
-
-    const result = await db.collection("ideas").insertOne({
-      ...req.body,
-      createdAt: new Date(),
-    });
-
-    res.status(201).json({ success: true, data: result });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
 // GET ALL IDEAS
 app.get("/ideas", async (req, res) => {
   try {
     const db = await getDB();
-
     const ideas = await db.collection("ideas").find().toArray();
 
     res.json({ success: true, data: ideas });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -122,24 +94,24 @@ app.get("/ideas/:id", async (req, res) => {
     });
 
     res.json({ success: true, data: idea });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// MY IDEAS
-app.get("/my-ideas/:userId", async (req, res) => {
+// CREATE IDEA
+app.post("/ideas", async (req, res) => {
   try {
     const db = await getDB();
 
-    const ideas = await db
-      .collection("ideas")
-      .find({ userId: req.params.userId })
-      .toArray();
+    const result = await db.collection("ideas").insertOne({
+      ...req.body,
+      createdAt: new Date(),
+    });
 
-    res.json({ success: true, data: ideas });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -154,8 +126,8 @@ app.patch("/ideas/:id", async (req, res) => {
     );
 
     res.json({ success: true, data: result });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -164,13 +136,13 @@ app.delete("/ideas/:id", async (req, res) => {
   try {
     const db = await getDB();
 
-    await db.collection("ideas").deleteOne({
+    const result = await db.collection("ideas").deleteOne({
       _id: new ObjectId(req.params.id),
     });
 
-    res.json({ success: true, message: "Idea deleted" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -178,14 +150,15 @@ app.delete("/ideas/:id", async (req, res) => {
    COMMENTS
 ====================== */
 
-// ADD COMMENT
 app.post("/ideas/:id/comments", async (req, res) => {
   try {
     const db = await getDB();
 
     const comment = {
       _id: new ObjectId(),
-      ...req.body,
+      userId: req.body.userId,
+      userName: req.body.userName,
+      text: req.body.text,
       createdAt: new Date(),
     };
 
@@ -195,8 +168,27 @@ app.post("/ideas/:id/comments", async (req, res) => {
     );
 
     res.json({ success: true, data: comment });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/* ======================
+   MY IDEAS
+====================== */
+
+app.get("/my-ideas/:userId", async (req, res) => {
+  try {
+    const db = await getDB();
+
+    const ideas = await db
+      .collection("ideas")
+      .find({ userId: req.params.userId })
+      .toArray();
+
+    res.json({ success: true, data: ideas });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -204,7 +196,6 @@ app.post("/ideas/:id/comments", async (req, res) => {
    PROFILE
 ====================== */
 
-// GET PROFILE
 app.get("/profile/:id", async (req, res) => {
   try {
     const db = await getDB();
@@ -214,30 +205,12 @@ app.get("/profile/:id", async (req, res) => {
     });
 
     res.json({ success: true, data: user });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
 /* ======================
-   HOME (LIMIT 6)
+   EXPORT FOR VERCEL
 ====================== */
-
-app.get("/idea", async (req, res) => {
-  try {
-    const db = await getDB();
-
-    const ideas = await db.collection("ideas").find().limit(6).toArray();
-
-    res.json({ success: true, data: ideas });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-/* ======================
-   START SERVER
-====================== */
-app.listen(port, () => {
-  console.log(`🚀 Server running on port ${port}`);
-});
+export default app;
