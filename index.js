@@ -382,37 +382,58 @@ app.get("/profile/:id", async (req, res) => {
   }
 });
 /* ======================
-   UPDATE PROFILE ROUTE
+  UPDATE PROFILE ROUTE
 ====================== */
 app.patch("/profile/:id", async (req, res) => {
   try {
     const db = await getDB();
-    const id = toObjectId(req.params.id);
+    const rawId = req.params.id;
+    const mongoId = toObjectId(rawId);
 
-    if (!id)
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid ID Format" });
+    let query = {};
+    if (mongoId) {
+      query = { _id: mongoId };
+    } else {
+      query = { $or: [{ id: rawId }, { userId: rawId }] };
+    }
 
     const { name, image } = req.body;
-    let updateFields = {};
+    let updateFields = {
+      updatedAt: new Date(), 
+    };
 
     if (name) updateFields.name = name;
     if (image) updateFields.image = image;
 
     const result = await db
       .collection("users")
-      .updateOne({ _id: id }, { $set: updateFields });
+      .updateOne(query, { $set: updateFields });
 
     if (result.matchedCount === 0) {
+      
+      if (req.body.email) {
+        const emailResult = await db
+          .collection("users")
+          .updateOne({ email: req.body.email }, { $set: updateFields });
+        if (emailResult.matchedCount > 0) {
+          return res.json({
+            success: true,
+            message: "Profile updated via email match",
+            data: updateFields,
+          });
+        }
+      }
       return res
         .status(404)
-        .json({ success: false, message: "User not found" });
+        .json({
+          success: false,
+          message: "User not found in database with this ID",
+        });
     }
 
     res.json({
       success: true,
-      message: "Profile updated successfully",
+      message: "Profile updated successfully 🎉",
       data: updateFields,
     });
   } catch (error) {
