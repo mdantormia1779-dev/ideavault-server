@@ -7,23 +7,46 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const app = express();
 const port = process.env.PORT || 5000;
 
-// ✅ CORS (FIXED)
+/* ======================
+   CORS (PRODUCTION FIXED)
+====================== */
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://ideavault-client-9dxc-mimsfsjha-md-antor-mias-projects.vercel.app",
+];
+
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      "https://ideavault-client-nu.vercel.app",
-    ],
+    origin: (origin, callback) => {
+      // allow Postman / server-to-server
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.log("❌ CORS BLOCKED:", origin);
+      return callback(null, false);
+    },
     credentials: true,
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   })
 );
 
+// IMPORTANT: preflight support
+app.options("*", cors());
+
 app.use(express.json());
 
-// ✅ MongoDB URI
+/* ======================
+   MONGODB SETUP (VERCEL SAFE)
+====================== */
 const uri = process.env.DB_URI;
 
-// ✅ GLOBAL CLIENT (FIXED)
+if (!uri) {
+  throw new Error("❌ DB_URI is missing in environment variables");
+}
+
 let client;
 let clientPromise;
 
@@ -41,7 +64,9 @@ if (!global._mongoClientPromise) {
 
 clientPromise = global._mongoClientPromise;
 
-// ✅ DB HELPER
+/* ======================
+   DB HELPER
+====================== */
 async function getDB() {
   const client = await clientPromise;
   return client.db("idea_vault");
@@ -51,7 +76,7 @@ async function getDB() {
    ROOT
 ====================== */
 app.get("/", (req, res) => {
-  res.send("🚀 IdeaVault server is running...");
+  res.send("🚀 IdeaVault API is running...");
 });
 
 /* ======================
@@ -143,7 +168,7 @@ app.delete("/ideas/:id", async (req, res) => {
       _id: new ObjectId(req.params.id),
     });
 
-    res.json({ success: true, message: "Deleted" });
+    res.json({ success: true, message: "Idea deleted" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -153,6 +178,7 @@ app.delete("/ideas/:id", async (req, res) => {
    COMMENTS
 ====================== */
 
+// ADD COMMENT
 app.post("/ideas/:id/comments", async (req, res) => {
   try {
     const db = await getDB();
@@ -178,6 +204,7 @@ app.post("/ideas/:id/comments", async (req, res) => {
    PROFILE
 ====================== */
 
+// GET PROFILE
 app.get("/profile/:id", async (req, res) => {
   try {
     const db = await getDB();
@@ -193,7 +220,7 @@ app.get("/profile/:id", async (req, res) => {
 });
 
 /* ======================
-   HOME LIMIT
+   HOME (LIMIT 6)
 ====================== */
 
 app.get("/idea", async (req, res) => {
@@ -208,8 +235,9 @@ app.get("/idea", async (req, res) => {
   }
 });
 
-/* ====================== */
-
+/* ======================
+   START SERVER
+====================== */
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });
