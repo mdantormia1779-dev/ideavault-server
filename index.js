@@ -376,7 +376,7 @@ app.get("/profile/:id", async (req, res) => {
       });
     }
 
-    const user = await db.collection("users").findOne({ _id: id });
+    const user = await db.collection("user").findOne({ _id: id });
 
     if (!user) {
       return res.status(404).json({
@@ -427,7 +427,7 @@ app.patch("/profile/:id", async (req, res) => {
     };
 
     const result = await db
-      .collection("users")
+      .collection("user")
       .updateOne({ _id: id }, updateDoc);
 
     if (result.matchedCount === 0) {
