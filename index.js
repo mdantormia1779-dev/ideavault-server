@@ -14,7 +14,7 @@ app.use(express.json());
 app.use(
   cors({
     origin: "*",
-  })
+  }),
 );
 
 /* ======================
@@ -27,7 +27,7 @@ if (!uri) {
 }
 
 const client = new MongoClient(uri);
-let cachedDb = null; 
+let cachedDb = null;
 
 async function getDB() {
   if (cachedDb) {
@@ -67,7 +67,7 @@ app.get("/", (req, res) => {
 // ১. GET ALL IDEAS
 app.get("/ideas", async (req, res) => {
   try {
-    const db = await getDB(); 
+    const db = await getDB();
     const ideas = await db.collection("ideas").find().toArray();
     res.json({ success: true, data: ideas });
   } catch (error) {
@@ -76,7 +76,7 @@ app.get("/ideas", async (req, res) => {
   }
 });
 
-// ২. LIMIT 6 IDEAS 
+// ২. LIMIT 6 IDEAS
 app.get("/ideas/limit", async (req, res) => {
   try {
     const db = await getDB();
@@ -88,7 +88,7 @@ app.get("/ideas/limit", async (req, res) => {
   }
 });
 
-// ৩. SINGLE IDEA 
+// ৩. SINGLE IDEA
 app.get("/ideas/:id", async (req, res) => {
   try {
     const db = await getDB();
@@ -97,7 +97,10 @@ app.get("/ideas/:id", async (req, res) => {
     if (!id) return res.status(400).json({ message: "Invalid ID Format" });
 
     const idea = await db.collection("ideas").findOne({ _id: id });
-    if (!idea) return res.status(404).json({ success: false, message: "Idea not found" });
+    if (!idea)
+      return res
+        .status(404)
+        .json({ success: false, message: "Idea not found" });
 
     res.json({ success: true, data: idea });
   } catch (error) {
@@ -177,10 +180,9 @@ app.post("/ideas/:id/comments", async (req, res) => {
       createdAt: new Date(),
     };
 
-    await db.collection("ideas").updateOne(
-      { _id: id },
-      { $push: { comments: comment } }
-    );
+    await db
+      .collection("ideas")
+      .updateOne({ _id: id }, { $push: { comments: comment } });
 
     res.json({ success: true, data: comment });
   } catch (error) {
@@ -197,16 +199,22 @@ app.patch("/ideas/:id/comments/:commentId", async (req, res) => {
     const commentId = toObjectId(req.params.commentId);
 
     if (!ideaId || !commentId) {
-      return res.status(400).json({ success: false, message: "Invalid ID Format" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid ID Format" });
     }
 
-    const result = await db.collection("ideas").updateOne(
-      { _id: ideaId, "comments._id": commentId },
-      { $set: { "comments.$.text": req.body.text } }
-    );
+    const result = await db
+      .collection("ideas")
+      .updateOne(
+        { _id: ideaId, "comments._id": commentId },
+        { $set: { "comments.$.text": req.body.text } },
+      );
 
     if (result.matchedCount === 0) {
-      return res.status(404).json({ success: false, message: "Comment not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Comment not found" });
     }
 
     res.json({ success: true, message: "Comment updated successfully" });
@@ -224,13 +232,14 @@ app.delete("/ideas/:id/comments/:commentId", async (req, res) => {
     const commentId = toObjectId(req.params.commentId);
 
     if (!ideaId || !commentId) {
-      return res.status(400).json({ success: false, message: "Invalid ID Format" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid ID Format" });
     }
 
-    const result = await db.collection("ideas").updateOne(
-      { _id: ideaId },
-      { $pull: { comments: { _id: commentId } } }
-    );
+    const result = await db
+      .collection("ideas")
+      .updateOne({ _id: ideaId }, { $pull: { comments: { _id: commentId } } });
 
     res.json({ success: true, message: "Comment deleted successfully" });
   } catch (error) {
@@ -261,7 +270,7 @@ app.get("/my-ideas/:userId", async (req, res) => {
    INTERACTIONS ROUTE
 ====================== */
 
-// ১. GET USER INTERACTIONS
+// ১. GET USER INTERACTIONS (GET https://vercel.app)
 app.get("/my-interactions/:userId", async (req, res) => {
   try {
     const db = await getDB();
@@ -274,17 +283,21 @@ app.get("/my-interactions/:userId", async (req, res) => {
       {
         $project: {
           _id: 0,
-          ideaId: "$_id",
-          ideaTitle: "$title", 
-          ideaImage: "$image", 
-          commentId: "$comments._id",
-          commentText: "$comments.text",
-          createdAt: "$comments.createdAt"
-        }
-      }
+          // ObjectId গুলোকে ফ্রন্টএন্ডের জন্য স্ট্রিংয়ে কনভার্ট করা হয়েছে
+          ideaId: { $toString: "$_id" },
+          ideaTitle: "$title",
+          ideaImage: "$image",
+          commentId: { $toString: "$comments._id" },
+          comment: "$comments.text", // 👈 ফ্রন্টএন্ডের সাথে মিলিয়ে 'comment' করা হলো
+          createdAt: "$comments.createdAt",
+        },
+      },
     ];
 
-    const interactions = await db.collection("ideas").aggregate(pipeline).toArray();
+    const interactions = await db
+      .collection("ideas")
+      .aggregate(pipeline)
+      .toArray();
     res.json({ success: true, data: interactions });
   } catch (error) {
     console.error("Error in GET /my-interactions:", error);
@@ -303,12 +316,18 @@ app.post("/saved-ideas", async (req, res) => {
     const { userId, ideaId, ideaTitle, ideaImage } = req.body;
 
     if (!userId || !ideaId) {
-      return res.status(400).json({ success: false, message: "UserId and IdeaId are required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "UserId and IdeaId are required" });
     }
 
-    const existing = await db.collection("saved_ideas").findOne({ userId, ideaId });
+    const existing = await db
+      .collection("saved_ideas")
+      .findOne({ userId, ideaId });
     if (existing) {
-      return res.status(400).json({ success: false, message: "Idea already saved" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Idea already saved" });
     }
 
     const result = await db.collection("saved_ideas").insertOne({
@@ -316,7 +335,7 @@ app.post("/saved-ideas", async (req, res) => {
       ideaId,
       ideaTitle,
       ideaImage,
-      savedAt: new Date()
+      savedAt: new Date(),
     });
 
     res.json({ success: true, data: result });
@@ -348,8 +367,14 @@ app.delete("/saved-ideas/:userId/:ideaId", async (req, res) => {
     const db = await getDB();
     const { userId, ideaId } = req.params;
 
-    const result = await db.collection("saved_ideas").deleteOne({ userId, ideaId });
-    res.json({ success: true, message: "Idea removed from saved list", data: result });
+    const result = await db
+      .collection("saved_ideas")
+      .deleteOne({ userId, ideaId });
+    res.json({
+      success: true,
+      message: "Idea removed from saved list",
+      data: result,
+    });
   } catch (error) {
     console.error("Error in DELETE /saved-ideas:", error);
     res.status(500).json({ success: false, error: error.message });
