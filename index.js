@@ -1,38 +1,51 @@
-import dns from 'node:dns';
-dns.setServers(['8.8.8.8', '8.8.4.4']);
+import dns from "node:dns";
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
+
 import express from "express";
 import cors from "cors";
+import dotenv from "dotenv";
 import { MongoClient, ServerApiVersion, ObjectId } from "mongodb";
+
+dotenv.config();
 
 const app = express();
 
 /* ======================
-   SAFE CORS (NO CRASH)
+   CORS CONFIG (FIXED)
 ====================== */
+
+const allowedOrigins = [
+  "https://ideavault-client-tawny.vercel.app",
+];
 
 app.use(
   cors({
-    origin: "*", // 🔥 FULL OPEN (for debugging + no CORS issue)
+    origin: function (origin, callback) {
+      // allow tools like Postman
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("❌ Not allowed by CORS: " + origin));
+    },
     methods: ["GET", "POST", "PATCH", "DELETE"],
-    credentials: false,
+    credentials: true,
   })
 );
 
 app.use(express.json());
 
 /* ======================
-   ENV CHECK
+   MONGO DB
 ====================== */
 
 const uri = process.env.DB_URI;
 
 if (!uri) {
-  throw new Error("❌ DB_URI missing in Vercel environment variables");
+  throw new Error("❌ DB_URI missing in environment variables");
 }
-
-/* ======================
-   MONGO CLIENT (SAFE)
-====================== */
 
 let client;
 let clientPromise;
@@ -57,7 +70,7 @@ async function getDB() {
 }
 
 /* ======================
-   HELPER (SAFE OBJECT ID)
+   HELPERS
 ====================== */
 
 function safeObjectId(id) {
@@ -69,7 +82,7 @@ function safeObjectId(id) {
 }
 
 /* ======================
-   ROOT
+   ROOT TEST
 ====================== */
 
 app.get("/", (req, res) => {
@@ -83,34 +96,29 @@ app.get("/", (req, res) => {
    IDEAS ROUTES
 ====================== */
 
-// GET ALL IDEAS
+// GET ALL
 app.get("/ideas", async (req, res) => {
   try {
     const db = await getDB();
-
     const ideas = await db.collection("ideas").find().toArray();
-
     res.json({ success: true, data: ideas });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
-// GET LIMIT 6
+// LIMIT 6
 app.get("/idea", async (req, res) => {
   try {
     const db = await getDB();
-
     const ideas = await db.collection("ideas").find().limit(6).toArray();
-
     res.json({ success: true, data: ideas });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
-// GET SINGLE IDEA
+// SINGLE
 app.get("/ideas/:id", async (req, res) => {
   try {
     const db = await getDB();
@@ -126,7 +134,7 @@ app.get("/ideas/:id", async (req, res) => {
   }
 });
 
-// CREATE IDEA
+// CREATE
 app.post("/ideas", async (req, res) => {
   try {
     const db = await getDB();
@@ -142,7 +150,7 @@ app.post("/ideas", async (req, res) => {
   }
 });
 
-// UPDATE IDEA
+// UPDATE
 app.patch("/ideas/:id", async (req, res) => {
   try {
     const db = await getDB();
@@ -160,7 +168,7 @@ app.patch("/ideas/:id", async (req, res) => {
   }
 });
 
-// DELETE IDEA
+// DELETE
 app.delete("/ideas/:id", async (req, res) => {
   try {
     const db = await getDB();
@@ -245,7 +253,17 @@ app.get("/profile/:id", async (req, res) => {
 });
 
 /* ======================
-   EXPORT (VERCEL)
+   START SERVER (LOCAL ONLY)
+====================== */
+
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log(` Server running on port ${PORT}`);
+});
+
+/* ======================
+   VERCEL EXPORT
 ====================== */
 
 export default app;
