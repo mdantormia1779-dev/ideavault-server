@@ -56,7 +56,7 @@ function toObjectId(id) {
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "🚀 IdeaVault API Running Successfully",
+    message: " IdeaVault API Running Successfully",
   });
 });
 
@@ -343,62 +343,6 @@ app.post("/saved-ideas", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
-// ১. GET ALL IDEAS WITH SEARCH & FILTER (100% Fixed for Title and Tag-based Search)
-app.get("/ideas", async (req, res) => {
-  try {
-    const db = await getDB();
-    const { search, category, startDate, endDate } = req.query;
-
-    let query = {};
-
-    if (search && String(search).trim() !== "") {
-      const searchRegex = { $regex: String(search).trim(), $options: "i" };
-      query.$or = [
-        { title: searchRegex },
-        { tags: searchRegex },
-        { shortDesc: searchRegex } 
-      ];
-    }
-
-    // ২. CATEGORY FILTER
-    if (category && String(category).trim() !== "") {
-      query.category = String(category).trim();
-    }
-
-    
-    if (startDate || endDate) {
-      query.createdAt = {};
-      
-      if (startDate) {
-        const start = new Date(startDate + "T00:00:00.000Z");
-        if (!isNaN(start.getTime())) {
-          query.createdAt.$gte = start;
-        }
-      }
-      
-      if (endDate) {
-        const end = new Date(endDate + "T23:59:59.999Z");
-        if (!isNaN(end.getTime())) {
-          query.createdAt.$lte = end;
-        }
-      }
-    }
-
-    const ideas = await db
-      .collection("ideas")
-      .find(query)
-      .sort({ _id: -1 }) 
-      .toArray();
-
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
-    res.json({ success: true, count: ideas.length, data: ideas });
-  } catch (error) {
-    console.error("Error in GET /ideas:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 
 
 
