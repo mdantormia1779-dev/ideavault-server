@@ -382,62 +382,35 @@ app.get("/profile/:id", async (req, res) => {
   }
 });
 /* ======================
-  UPDATE PROFILE ROUTE
+  FIXED GET PROFILE ROUTE (Supports ID & Email)
 ====================== */
-app.patch("/profile/:id", async (req, res) => {
+app.get("/profile/:id", async (req, res) => {
   try {
     const db = await getDB();
-    const rawId = req.params.id;
-    const mongoId = toObjectId(rawId);
+    const param = req.params.id;
+    const mongoId = toObjectId(param);
 
     let query = {};
-    if (mongoId) {
+    
+    if (param.includes("@")) {
+      query = { email: param };
+    } else if (mongoId) {
       query = { _id: mongoId };
     } else {
-      query = { $or: [{ id: rawId }, { userId: rawId }] };
+      query = { $or: [{ id: param }, { userId: param }] };
     }
 
-    const { name, image } = req.body;
-    let updateFields = {
-      updatedAt: new Date(), 
-    };
+    const user = await db.collection("users").findOne(query);
 
-    if (name) updateFields.name = name;
-    if (image) updateFields.image = image;
-
-    const result = await db
-      .collection("users")
-      .updateOne(query, { $set: updateFields });
-
-    if (result.matchedCount === 0) {
-      
-      if (req.body.email) {
-        const emailResult = await db
-          .collection("users")
-          .updateOne({ email: req.body.email }, { $set: updateFields });
-        if (emailResult.matchedCount > 0) {
-          return res.json({
-            success: true,
-            message: "Profile updated via email match",
-            data: updateFields,
-          });
-        }
-      }
+    if (!user) {
       return res
         .status(404)
-        .json({
-          success: false,
-          message: "User not found in database with this ID",
-        });
+        .json({ success: false, message: "User not found" });
     }
 
-    res.json({
-      success: true,
-      message: "Profile updated successfully 🎉",
-      data: updateFields,
-    });
+    res.json({ success: true, data: user });
   } catch (error) {
-    console.error("Error in PATCH /profile:", error);
+    console.error("Error in GET /profile:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
