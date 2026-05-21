@@ -345,18 +345,51 @@ app.post("/saved-ideas", async (req, res) => {
   }
 });
 
-// ২. GET ALL SAVED IDEAS BY USER
-app.get("/saved-ideas/:userId", async (req, res) => {
+// ১. GET ALL IDEAS WITH SEARCH & FILTER
+app.get("/ideas", async (req, res) => {
   try {
     const db = await getDB();
-    const saved = await db
-      .collection("saved_ideas")
-      .find({ userId: req.params.userId })
+    const { search, category, startDate, endDate } = req.query;
+
+    // ডাইনামিক কোয়েরি অবজেক্ট
+    let query = {};
+
+    // ১. TITLE SEARCH (Case-insensitive using $regex)
+    if (search) {
+      query.title = { $regex: search, $options: "i" };
+    }
+
+    // ২. CATEGORY FILTER
+    if (category) {
+      query.category = category;
+    }
+
+    // ৩. DATE RANGE FILTER ($gte, $lte) - Optional
+    if (startDate || endDate) {
+      query.createdAt = {};
+      
+      if (startDate) {
+        query.createdAt.$gte = new Date(startDate); // শুরু হওয়ার তারিখ
+      }
+      
+      if (endDate) {
+        // দিনের শেষ সময় পর্যন্ত (23:59:59) ডাটা পাওয়ার জন্য এন্ড ডেট সেট করা হয়েছে
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end; // শেষ হওয়ার তারিখ
+      }
+    }
+
+    // ডাটাবেজ থেকে কুয়েরি অনুযায়ী ফিল্টার করে এবং লেটেস্ট আইডিয়াগুলো আগে শো করার জন্য সর্ট করা হচ্ছে
+    const ideas = await db
+      .collection("ideas")
+      .find(query)
+      .sort({ createdAt: -1 }) 
       .toArray();
 
-    res.json({ success: true, data: saved });
+    res.json({ success: true, count: ideas.length, data: ideas });
   } catch (error) {
-    console.error("Error in GET /saved-ideas:", error);
+    console.error("Error in GET /ideas:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
