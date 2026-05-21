@@ -283,12 +283,11 @@ app.get("/my-interactions/:userId", async (req, res) => {
       {
         $project: {
           _id: 0,
-          // ObjectId গুলোকে ফ্রন্টএন্ডের জন্য স্ট্রিংয়ে কনভার্ট করা হয়েছে
           ideaId: { $toString: "$_id" },
           ideaTitle: "$title",
           ideaImage: "$image",
           commentId: { $toString: "$comments._id" },
-          comment: "$comments.text", // 👈 ফ্রন্টএন্ডের সাথে মিলিয়ে 'comment' করা হলো
+          comment: "$comments.text", 
           createdAt: "$comments.createdAt",
         },
       },
@@ -345,7 +344,7 @@ app.post("/saved-ideas", async (req, res) => {
   }
 });
 
-// ১. GET ALL IDEAS WITH SEARCH & FILTER (100% Fixed and Safe for MongoDB BSON Dates)
+// ১. GET ALL IDEAS WITH SEARCH & FILTER (100% Fixed for Title and Tag-based Search)
 app.get("/ideas", async (req, res) => {
   try {
     const db = await getDB();
@@ -353,22 +352,25 @@ app.get("/ideas", async (req, res) => {
 
     let query = {};
 
-    // ১. TITLE SEARCH (Case-insensitive using $regex)
-    if (search && search.trim() !== "") {
-      query.title = { $regex: search.trim(), $options: "i" };
+    if (search && String(search).trim() !== "") {
+      const searchRegex = { $regex: String(search).trim(), $options: "i" };
+      query.$or = [
+        { title: searchRegex },
+        { tags: searchRegex },
+        { shortDesc: searchRegex } 
+      ];
     }
 
-    // ২. CATEGORY FILTER (Strict match)
-    if (category && category !== "") {
-      query.category = category;
+    // ২. CATEGORY FILTER
+    if (category && String(category).trim() !== "") {
+      query.category = String(category).trim();
     }
 
-    //
+    
     if (startDate || endDate) {
       query.createdAt = {};
       
       if (startDate) {
-       
         const start = new Date(startDate + "T00:00:00.000Z");
         if (!isNaN(start.getTime())) {
           query.createdAt.$gte = start;
@@ -376,28 +378,27 @@ app.get("/ideas", async (req, res) => {
       }
       
       if (endDate) {
-        
         const end = new Date(endDate + "T23:59:59.999Z");
         if (!isNaN(end.getTime())) {
           query.createdAt.$lte = end;
         }
       }
-      
     }
 
-    
     const ideas = await db
       .collection("ideas")
       .find(query)
-      .sort({ _id: -1 })
+      .sort({ _id: -1 }) 
       .toArray();
 
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
     res.json({ success: true, count: ideas.length, data: ideas });
   } catch (error) {
     console.error("Error in GET /ideas:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
 
 
 
