@@ -345,8 +345,7 @@ app.post("/saved-ideas", async (req, res) => {
   }
 });
 
-
-// ১. GET ALL IDEAS WITH SEARCH & FILTER (Fixed: Missing createdAt Field Handling)
+// ১. GET ALL IDEAS WITH SEARCH & FILTER (100% Fixed and Safe for MongoDB BSON Dates)
 app.get("/ideas", async (req, res) => {
   try {
     const db = await getDB();
@@ -354,38 +353,43 @@ app.get("/ideas", async (req, res) => {
 
     let query = {};
 
-    // ১. TITLE SEARCH (Case-insensitive)
+    // ১. TITLE SEARCH (Case-insensitive using $regex)
     if (search && search.trim() !== "") {
       query.title = { $regex: search.trim(), $options: "i" };
     }
 
-    // ২. CATEGORY FILTER
+    // ২. CATEGORY FILTER (Strict match)
     if (category && category !== "") {
       query.category = category;
     }
 
-    // ৩. DATE RANGE FILTER (শুধু তখনই কোয়েরিতে যুক্ত হবে যখন ফ্রন্টএন্ড থেকে ডেট পাঠানো হবে)
+    //
     if (startDate || endDate) {
       query.createdAt = {};
       
       if (startDate) {
-        const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0);
-        query.createdAt.$gte = start;
+       
+        const start = new Date(startDate + "T00:00:00.000Z");
+        if (!isNaN(start.getTime())) {
+          query.createdAt.$gte = start;
+        }
       }
       
       if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        query.createdAt.$lte = end;
+        
+        const end = new Date(endDate + "T23:59:59.999Z");
+        if (!isNaN(end.getTime())) {
+          query.createdAt.$lte = end;
+        }
       }
+      
     }
 
-    // ডাটাবেজ থেকে ডাটা নিয়ে আসা হচ্ছে
+    
     const ideas = await db
       .collection("ideas")
       .find(query)
-      .sort({ _id: -1 }) // createdAt ফিল্ড না থাকলেও নতুন আইডিয়া আগে দেখানোর জন্য _id ব্যবহার করা হয়েছে
+      .sort({ _id: -1 })
       .toArray();
 
     res.json({ success: true, count: ideas.length, data: ideas });
