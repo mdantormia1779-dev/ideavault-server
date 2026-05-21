@@ -382,35 +382,65 @@ app.get("/profile/:id", async (req, res) => {
   }
 });
 /* ======================
-  FIXED GET PROFILE ROUTE (Supports ID & Email)
+   🔥 ULTIMATE FIXED UPDATE PROFILE ROUTE (No more 400 or 404)
 ====================== */
-app.get("/profile/:id", async (req, res) => {
+app.patch("/profile/:id", async (req, res) => {
   try {
     const db = await getDB();
-    const param = req.params.id;
-    const mongoId = toObjectId(param);
+    const rawId = req.params.id;
+    const queryEmail = req.query.email || req.body.email; // কুয়েরি বা বডি থেকে ইমেইল নেওয়া হচ্ছে
 
     let query = {};
-    
-    if (param.includes("@")) {
-      query = { email: param };
-    } else if (mongoId) {
+
+    // ১. প্রথমে আইডি অবজেক্ট আইডি কিনা চেক করা (যাতে ৪00 এরর না আসে)
+    const mongoId = toObjectId(rawId);
+    if (mongoId) {
       query = { _id: mongoId };
+    } else if (rawId && rawId !== "undefined" && !rawId.includes("@")) {
+      query = { $or: [{ id: rawId }, { userId: rawId }] };
+    } else if (queryEmail) {
+      // যদি আইডি ইনভ্যালিড হয় কিন্তু ইমেইল থাকে, তবে ইমেইল দিয়ে ম্যাচ করবে
+      query = { email: queryEmail };
     } else {
-      query = { $or: [{ id: param }, { userId: param }] };
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Valid User ID or Email is required",
+        });
     }
 
-    const user = await db.collection("users").findOne(query);
+    const { name, image } = req.body;
+    let updateFields = { updatedAt: new Date() };
 
-    if (!user) {
+    if (name) updateFields.name = name;
+    if (image) updateFields.image = image;
+
+   
+    let result = await db
+      .collection("users")
+      .updateOne(query, { $set: updateFields });
+
+   
+    if (result.matchedCount === 0 && queryEmail) {
+      result = await db
+        .collection("users")
+        .updateOne({ email: queryEmail }, { $set: updateFields });
+    }
+
+    if (result.matchedCount === 0) {
       return res
         .status(404)
-        .json({ success: false, message: "User not found" });
+        .json({ success: false, message: "User not found in database" });
     }
 
-    res.json({ success: true, data: user });
+    res.json({
+      success: true,
+      message: "Profile updated successfully 🎉",
+      data: updateFields,
+    });
   } catch (error) {
-    console.error("Error in GET /profile:", error);
+    console.error("Error in PATCH /profile:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
