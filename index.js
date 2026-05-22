@@ -17,7 +17,7 @@ app.use(
   cors({
     origin: [
       "http://localhost:3000",
-      "https://ideavault-client-tawny.vercel.app",
+      "https://ideavault-client-eight.vercel.app",
     ],
     credentials: true,
   })
