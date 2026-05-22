@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const { MongoClient, ObjectId } = require("mongodb");
+const { auth } = require("./auth"); // 👈 তোমার better-auth file
 
 dotenv.config();
 
@@ -9,16 +10,20 @@ const app = express();
 app.use(express.json());
 
 /* ======================
-   CORS CONFIGURATION
+   CORS CONFIG
 ====================== */
 app.use(
   cors({
-    origin: "*",
-  }),
+    origin: [
+      "http://localhost:3000",
+      "https://your-frontend.vercel.app",
+    ],
+    credentials: true,
+  })
 );
 
 /* ======================
-   MONGO DB & SERVERLESS CONNECTION
+   MONGO CONNECTION
 ====================== */
 const uri = process.env.DB_URI;
 
@@ -30,12 +35,12 @@ const client = new MongoClient(uri);
 let cachedDb = null;
 
 async function getDB() {
-  if (cachedDb) {
-    return cachedDb;
-  }
+  if (cachedDb) return cachedDb;
+
   await client.connect();
   cachedDb = client.db("idea_vault");
-  console.log("MongoDB Connected Successfully");
+
+  console.log("MongoDB Connected");
   return cachedDb;
 }
 
@@ -51,12 +56,38 @@ function toObjectId(id) {
 }
 
 /* ======================
-   ROOT ROUTE
+   AUTH MIDDLEWARE
+====================== */
+const requireAuth = async (req, res, next) => {
+  try {
+    const session = await auth.api.getSession({
+      headers: req.headers,
+    });
+
+    if (!session?.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    req.user = session.user;
+    next();
+  } catch (err) {
+    return res.status(401).json({
+      success: false,
+      message: "Auth failed",
+    });
+  }
+};
+
+/* ======================
+   ROOT
 ====================== */
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: " IdeaVault API Running Successfully",
+    message: "IdeaVault API Running 🚀",
   });
 });
 
@@ -64,399 +95,213 @@ app.get("/", (req, res) => {
    IDEAS ROUTES
 ====================== */
 
-// ১. GET ALL IDEAS
+// GET ALL IDEAS
 app.get("/ideas", async (req, res) => {
   try {
     const db = await getDB();
     const ideas = await db.collection("ideas").find().toArray();
+
     res.json({ success: true, data: ideas });
-  } catch (error) {
-    console.error("Error in GET /ideas:", error);
-    res.status(500).json({ success: false, error: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ২. LIMIT 6 IDEAS
+// LIMIT 6
 app.get("/ideas/limit", async (req, res) => {
   try {
     const db = await getDB();
     const ideas = await db.collection("ideas").find().limit(6).toArray();
+
     res.json({ success: true, data: ideas });
-  } catch (error) {
-    console.error("Error in GET /ideas/limit:", error);
-    res.status(500).json({ success: false, error: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ৩. SINGLE IDEA
+// SINGLE IDEA
 app.get("/ideas/:id", async (req, res) => {
   try {
     const db = await getDB();
     const id = toObjectId(req.params.id);
 
-    if (!id) return res.status(400).json({ message: "Invalid ID Format" });
+    if (!id) {
+      return res.status(400).json({ message: "Invalid ID" });
+    }
 
     const idea = await db.collection("ideas").findOne({ _id: id });
-    if (!idea)
-      return res
-        .status(404)
-        .json({ success: false, message: "Idea not found" });
+
+    if (!idea) {
+      return res.status(404).json({ message: "Not found" });
+    }
 
     res.json({ success: true, data: idea });
-  } catch (error) {
-    console.error("Error in GET /ideas/:id:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ৪. CREATE IDEA
-app.post("/ideas", async (req, res) => {
-  try {
-    const db = await getDB();
-    const result = await db.collection("ideas").insertOne({
-      ...req.body,
-      createdAt: new Date(),
-    });
-    res.json({ success: true, data: result });
-  } catch (error) {
-    console.error("Error in POST /ideas:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ৫. UPDATE IDEA
-app.patch("/ideas/:id", async (req, res) => {
-  try {
-    const db = await getDB();
-    const id = toObjectId(req.params.id);
-
-    if (!id) return res.status(400).json({ message: "Invalid ID Format" });
-
-    const result = await db
-      .collection("ideas")
-      .updateOne({ _id: id }, { $set: req.body });
-
-    res.json({ success: true, data: result });
-  } catch (error) {
-    console.error("Error in PATCH /ideas/:id:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ৬. DELETE IDEA
-app.delete("/ideas/:id", async (req, res) => {
-  try {
-    const db = await getDB();
-    const id = toObjectId(req.params.id);
-
-    if (!id) return res.status(400).json({ message: "Invalid ID Format" });
-
-    const result = await db.collection("ideas").deleteOne({ _id: id });
-
-    res.json({ success: true, data: result });
-  } catch (error) {
-    console.error("Error in DELETE /ideas/:id:", error);
-    res.status(500).json({ success: false, error: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
 /* ======================
-   COMMENTS ROUTE
+   CREATE IDEA (SECURE)
 ====================== */
+app.post("/ideas", requireAuth, async (req, res) => {
+  try {
+    const db = await getDB();
 
-// ১. CREATE COMMENT
-app.post("/ideas/:id/comments", async (req, res) => {
+    const {
+      title,
+      shortDesc,
+      description,
+      category,
+      tags,
+      image,
+      budget,
+      audience,
+      problem,
+      solution,
+    } = req.body;
+
+    if (!title || !shortDesc || !description || !audience) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields",
+      });
+    }
+
+    const newIdea = {
+      title,
+      shortDesc,
+      description,
+      category: category || "General",
+      tags: tags || "",
+      image: image || "",
+      budget: budget || "",
+      audience,
+      problem: problem || "",
+      solution: solution || "",
+
+      userId: new ObjectId(req.user.id),
+      userEmail: req.user.email,
+
+      createdAt: new Date(),
+    };
+
+    const result = await db.collection("ideas").insertOne(newIdea);
+
+    res.status(201).json({
+      success: true,
+      data: { _id: result.insertedId, ...newIdea },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ======================
+   UPDATE IDEA (OWNER ONLY)
+====================== */
+app.patch("/ideas/:id", requireAuth, async (req, res) => {
   try {
     const db = await getDB();
     const id = toObjectId(req.params.id);
 
-    if (!id) return res.status(400).json({ message: "Invalid ID Format" });
+    const idea = await db.collection("ideas").findOne({ _id: id });
+
+    if (!idea) {
+      return res.status(404).json({ message: "Not found" });
+    }
+
+    if (idea.userId.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    await db.collection("ideas").updateOne(
+      { _id: id },
+      { $set: { ...req.body, updatedAt: new Date() } }
+    );
+
+    res.json({ success: true, message: "Updated" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ======================
+   DELETE IDEA (OWNER ONLY)
+====================== */
+app.delete("/ideas/:id", requireAuth, async (req, res) => {
+  try {
+    const db = await getDB();
+    const id = toObjectId(req.params.id);
+
+    const idea = await db.collection("ideas").findOne({ _id: id });
+
+    if (!idea) {
+      return res.status(404).json({ message: "Not found" });
+    }
+
+    if (idea.userId.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    await db.collection("ideas").deleteOne({ _id: id });
+
+    res.json({ success: true, message: "Deleted" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ======================
+   MY IDEAS
+====================== */
+app.get("/my-ideas", requireAuth, async (req, res) => {
+  try {
+    const db = await getDB();
+
+    const ideas = await db
+      .collection("ideas")
+      .find({ userId: new ObjectId(req.user.id) })
+      .toArray();
+
+    res.json({ success: true, data: ideas });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ======================
+   COMMENTS (SECURE)
+====================== */
+app.post("/ideas/:id/comments", requireAuth, async (req, res) => {
+  try {
+    const db = await getDB();
+    const id = toObjectId(req.params.id);
 
     const comment = {
       _id: new ObjectId(),
-      userId: req.body.userId,
-      userName: req.body.userName,
+      userId: req.user.id,
+      userName: req.user.name,
       text: req.body.text,
       createdAt: new Date(),
     };
 
-    await db
-      .collection("ideas")
-      .updateOne({ _id: id }, { $push: { comments: comment } });
+    await db.collection("ideas").updateOne(
+      { _id: id },
+      { $push: { comments: comment } }
+    );
 
     res.json({ success: true, data: comment });
-  } catch (error) {
-    console.error("Error in POST /comments:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ২. UPDATE COMMENT
-app.patch("/ideas/:id/comments/:commentId", async (req, res) => {
-  try {
-    const db = await getDB();
-    const ideaId = toObjectId(req.params.id);
-    const commentId = toObjectId(req.params.commentId);
-
-    if (!ideaId || !commentId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid ID Format" });
-    }
-
-    const result = await db
-      .collection("ideas")
-      .updateOne(
-        { _id: ideaId, "comments._id": commentId },
-        { $set: { "comments.$.text": req.body.text } },
-      );
-
-    if (result.matchedCount === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Comment not found" });
-    }
-
-    res.json({ success: true, message: "Comment updated successfully" });
-  } catch (error) {
-    console.error("Error in PATCH /comments:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ৩. DELETE COMMENT
-app.delete("/ideas/:id/comments/:commentId", async (req, res) => {
-  try {
-    const db = await getDB();
-    const ideaId = toObjectId(req.params.id);
-    const commentId = toObjectId(req.params.commentId);
-
-    if (!ideaId || !commentId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid ID Format" });
-    }
-
-    const result = await db
-      .collection("ideas")
-      .updateOne({ _id: ideaId }, { $pull: { comments: { _id: commentId } } });
-
-    res.json({ success: true, message: "Comment deleted successfully" });
-  } catch (error) {
-    console.error("Error in DELETE /comments:", error);
-    res.status(500).json({ success: false, error: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
 /* ======================
-   MY IDEAS ROUTE
-====================== */
-app.get("/my-ideas/:userId", async (req, res) => {
-  try {
-    const db = await getDB();
-    const ideas = await db
-      .collection("ideas")
-      .find({ userId: req.params.userId })
-      .toArray();
-
-    res.json({ success: true, data: ideas });
-  } catch (error) {
-    console.error("Error in GET /my-ideas:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-/* ======================
-   INTERACTIONS ROUTE
-====================== */
-
-// ১. GET USER INTERACTIONS (GET https://vercel.app)
-app.get("/my-interactions/:userId", async (req, res) => {
-  try {
-    const db = await getDB();
-    const userId = req.params.userId;
-
-    const pipeline = [
-      { $match: { "comments.userId": userId } },
-      { $unwind: "$comments" },
-      { $match: { "comments.userId": userId } },
-      {
-        $project: {
-          _id: 0,
-          ideaId: { $toString: "$_id" },
-          ideaTitle: "$title",
-          ideaImage: "$image",
-          commentId: { $toString: "$comments._id" },
-          comment: "$comments.text",
-          createdAt: "$comments.createdAt",
-        },
-      },
-    ];
-
-    const interactions = await db
-      .collection("ideas")
-      .aggregate(pipeline)
-      .toArray();
-    res.json({ success: true, data: interactions });
-  } catch (error) {
-    console.error("Error in GET /my-interactions:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-/* ======================
-   SAVE / FAVORITE IDEAS ROUTE
-====================== */
-
-// ১. SAVE AN IDEA
-app.post("/saved-ideas", async (req, res) => {
-  try {
-    const db = await getDB();
-    const { userId, ideaId, ideaTitle, ideaImage } = req.body;
-
-    if (!userId || !ideaId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "UserId and IdeaId are required" });
-    }
-
-    const existing = await db
-      .collection("saved_ideas")
-      .findOne({ userId, ideaId });
-    if (existing) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Idea already saved" });
-    }
-
-    const result = await db.collection("saved_ideas").insertOne({
-      userId,
-      ideaId,
-      ideaTitle,
-      ideaImage,
-      savedAt: new Date(),
-    });
-
-    res.json({ success: true, data: result });
-  } catch (error) {
-    console.error("Error in POST /saved-ideas:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ৩. REMOVE SAVED IDEA
-app.delete("/saved-ideas/:userId/:ideaId", async (req, res) => {
-  try {
-    const db = await getDB();
-    const { userId, ideaId } = req.params;
-
-    const result = await db
-      .collection("saved_ideas")
-      .deleteOne({ userId, ideaId });
-    res.json({
-      success: true,
-      message: "Idea removed from saved list",
-      data: result,
-    });
-  } catch (error) {
-    console.error("Error in DELETE /saved-ideas:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get("/profile/:id", async (req, res) => {
-  try {
-    const db = await getDB();
-    const id = toObjectId(req.params.id);
-
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid ID Format",
-      });
-    }
-
-    const user = await db.collection("user").findOne({ _id: id });
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      data: user,
-    });
-  } catch (error) {
-    console.error("Error in GET /profile:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-app.patch("/profile/:id", async (req, res) => {
-  try {
-    const db = await getDB();
-    const id = toObjectId(req.params.id);
-
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid ID Format",
-      });
-    }
-
-    const { name, image } = req.body;
-
-    if (!name && !image) {
-      return res.status(400).json({
-        success: false,
-        message: "Nothing to update",
-      });
-    }
-
-    const updateDoc = {
-      $set: {
-        ...(name && { name }),
-        ...(image && { image }),
-        updatedAt: new Date(),
-      },
-    };
-
-    const result = await db
-      .collection("user")
-      .updateOne({ _id: id }, updateDoc);
-
-    if (result.matchedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    const updatedUser = await db.collection("users").findOne({ _id: id });
-
-    res.json({
-      success: true,
-      message: "Profile updated successfully 🎉",
-      data: updatedUser,
-    });
-  } catch (error) {
-    console.error("Error in PATCH /profile:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-/* ======================
-   START SERVER
+   SERVER START
 ====================== */
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
