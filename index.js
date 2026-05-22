@@ -1,8 +1,9 @@
+const dns = require("node:dns");
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const { MongoClient, ObjectId } = require("mongodb");
-const { auth } = require("./auth"); // 👈 তোমার better-auth file
 
 dotenv.config();
 
@@ -10,38 +11,53 @@ const app = express();
 app.use(express.json());
 
 /* ======================
-   CORS CONFIG
+   CORS
 ====================== */
 app.use(
   cors({
     origin: [
       "http://localhost:3000",
-      "https://your-frontend.vercel.app",
+      "https://ideavault-client-tawny.vercel.app",
     ],
     credentials: true,
   })
 );
 
 /* ======================
-   MONGO CONNECTION
+   ENV CHECK
 ====================== */
 const uri = process.env.DB_URI;
 
 if (!uri) {
-  throw new Error("DB_URI missing in Environment Variables");
+  throw new Error("❌ DB_URI missing in .env file");
 }
 
-const client = new MongoClient(uri);
-let cachedDb = null;
+/* ======================
+   MONGO CONNECTION (CLEAN)
+====================== */
+const client = new MongoClient(uri, {
+  maxPoolSize: 10,
+});
+
+let dbInstance = null;
 
 async function getDB() {
-  if (cachedDb) return cachedDb;
+  if (dbInstance) return dbInstance;
 
-  await client.connect();
-  cachedDb = client.db("idea_vault");
+  try {
+    console.log("⏳ Connecting to MongoDB...");
 
-  console.log("MongoDB Connected");
-  return cachedDb;
+    await client.connect();
+
+    dbInstance = client.db("idea_vault");
+
+    console.log("✅ MongoDB Connected Successfully");
+
+    return dbInstance;
+  } catch (err) {
+    console.error("❌ MongoDB Connection Error:", err.message);
+    throw err;
+  }
 }
 
 /* ======================
@@ -56,43 +72,25 @@ function toObjectId(id) {
 }
 
 /* ======================
-   AUTH MIDDLEWARE
+   ROOT TEST
 ====================== */
-const requireAuth = async (req, res, next) => {
+app.get("/", async (req, res) => {
   try {
-    const session = await auth.api.getSession({
-      headers: req.headers,
+    await getDB();
+    res.json({
+      success: true,
+      message: "IdeaVault API + DB Working 🚀",
     });
-
-    if (!session?.user) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized",
-      });
-    }
-
-    req.user = session.user;
-    next();
   } catch (err) {
-    return res.status(401).json({
+    res.status(500).json({
       success: false,
-      message: "Auth failed",
+      message: "DB connection failed",
     });
   }
-};
-
-/* ======================
-   ROOT
-====================== */
-app.get("/", (req, res) => {
-  res.json({
-    success: true,
-    message: "IdeaVault API Running 🚀",
-  });
 });
 
 /* ======================
-   IDEAS ROUTES
+   IDEAS API
 ====================== */
 
 // GET ALL IDEAS
@@ -125,15 +123,11 @@ app.get("/ideas/:id", async (req, res) => {
     const db = await getDB();
     const id = toObjectId(req.params.id);
 
-    if (!id) {
-      return res.status(400).json({ message: "Invalid ID" });
-    }
+    if (!id) return res.status(400).json({ message: "Invalid ID" });
 
     const idea = await db.collection("ideas").findOne({ _id: id });
 
-    if (!idea) {
-      return res.status(404).json({ message: "Not found" });
-    }
+    if (!idea) return res.status(404).json({ message: "Not found" });
 
     res.json({ success: true, data: idea });
   } catch (err) {
@@ -141,10 +135,8 @@ app.get("/ideas/:id", async (req, res) => {
   }
 });
 
-/* ======================
-   CREATE IDEA (SECURE)
-====================== */
-app.post("/ideas", requireAuth, async (req, res) => {
+// CREATE IDEA
+app.post("/ideas", async (req, res) => {
   try {
     const db = await getDB();
 
@@ -159,6 +151,7 @@ app.post("/ideas", requireAuth, async (req, res) => {
       audience,
       problem,
       solution,
+      userId,
     } = req.body;
 
     if (!title || !shortDesc || !description || !audience) {
@@ -179,10 +172,7 @@ app.post("/ideas", requireAuth, async (req, res) => {
       audience,
       problem: problem || "",
       solution: solution || "",
-
-      userId: new ObjectId(req.user.id),
-      userEmail: req.user.email,
-
+      userId: userId || null,
       createdAt: new Date(),
     };
 
@@ -193,95 +183,59 @@ app.post("/ideas", requireAuth, async (req, res) => {
       data: { _id: result.insertedId, ...newIdea },
     });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-/* ======================
-   UPDATE IDEA (OWNER ONLY)
-====================== */
-app.patch("/ideas/:id", requireAuth, async (req, res) => {
+// UPDATE IDEA
+app.patch("/ideas/:id", async (req, res) => {
   try {
     const db = await getDB();
     const id = toObjectId(req.params.id);
 
-    const idea = await db.collection("ideas").findOne({ _id: id });
+    if (!id) return res.status(400).json({ message: "Invalid ID" });
 
-    if (!idea) {
-      return res.status(404).json({ message: "Not found" });
-    }
-
-    if (idea.userId.toString() !== req.user.id) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-
-    await db.collection("ideas").updateOne(
-      { _id: id },
-      { $set: { ...req.body, updatedAt: new Date() } }
-    );
-
-    res.json({ success: true, message: "Updated" });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/* ======================
-   DELETE IDEA (OWNER ONLY)
-====================== */
-app.delete("/ideas/:id", requireAuth, async (req, res) => {
-  try {
-    const db = await getDB();
-    const id = toObjectId(req.params.id);
-
-    const idea = await db.collection("ideas").findOne({ _id: id });
-
-    if (!idea) {
-      return res.status(404).json({ message: "Not found" });
-    }
-
-    if (idea.userId.toString() !== req.user.id) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-
-    await db.collection("ideas").deleteOne({ _id: id });
-
-    res.json({ success: true, message: "Deleted" });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/* ======================
-   MY IDEAS
-====================== */
-app.get("/my-ideas", requireAuth, async (req, res) => {
-  try {
-    const db = await getDB();
-
-    const ideas = await db
+    const result = await db
       .collection("ideas")
-      .find({ userId: new ObjectId(req.user.id) })
-      .toArray();
+      .updateOne({ _id: id }, { $set: req.body });
 
-    res.json({ success: true, data: ideas });
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE IDEA
+app.delete("/ideas/:id", async (req, res) => {
+  try {
+    const db = await getDB();
+    const id = toObjectId(req.params.id);
+
+    if (!id) return res.status(400).json({ message: "Invalid ID" });
+
+    const result = await db.collection("ideas").deleteOne({ _id: id });
+
+    res.json({ success: true, data: result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 /* ======================
-   COMMENTS (SECURE)
+   COMMENTS
 ====================== */
-app.post("/ideas/:id/comments", requireAuth, async (req, res) => {
+
+// ADD COMMENT
+app.post("/ideas/:id/comments", async (req, res) => {
   try {
     const db = await getDB();
     const id = toObjectId(req.params.id);
 
     const comment = {
       _id: new ObjectId(),
-      userId: req.user.id,
-      userName: req.user.name,
+      userId: req.body.userId,
+      userName: req.body.userName,
       text: req.body.text,
       createdAt: new Date(),
     };
@@ -298,10 +252,258 @@ app.post("/ideas/:id/comments", requireAuth, async (req, res) => {
 });
 
 /* ======================
+   DELETE COMMENT
+====================== */
+
+app.delete("/ideas/:ideaId/comments/:commentId", async (req, res) => {
+  try {
+    const db = await getDB();
+
+    const ideaId = toObjectId(req.params.ideaId);
+    const commentId = req.params.commentId;
+
+    if (!ideaId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid idea ID",
+      });
+    }
+
+    const result = await db.collection("ideas").updateOne(
+      { _id: ideaId },
+      {
+        $pull: {
+          comments: { _id: new ObjectId(commentId) }
+        }
+      }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Comment not found or already deleted",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Comment deleted successfully",
+      data: result,
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// update comment
+app.patch("/ideas/:ideaId/comments/:commentId", async (req, res) => {
+  try {
+    const db = await getDB();
+
+    const ideaId = toObjectId(req.params.ideaId);
+    const commentId = req.params.commentId;
+
+    if (!ideaId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid idea ID",
+      });
+    }
+
+    const result = await db.collection("ideas").updateOne(
+      {
+        _id: ideaId,
+        "comments._id": new ObjectId(commentId),
+      },
+      {
+        $set: {
+          "comments.$.text": req.body.text,
+        },
+      }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Comment not found or not updated",
+      });
+    }
+
+    // updated comment return
+    const updatedIdea = await db
+      .collection("ideas")
+      .findOne({ _id: ideaId });
+
+    const updatedComment = updatedIdea.comments.find(
+      (c) => c._id.toString() === commentId
+    );
+
+    res.json({
+      success: true,
+      data: updatedComment,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+/* ======================
+   MY IDEAS
+====================== */
+app.get("/my-ideas/:userId", async (req, res) => {
+  try {
+    const db = await getDB();
+
+    const ideas = await db
+      .collection("ideas")
+      .find({ userId: req.params.userId })
+      .toArray();
+
+    res.json({ success: true, data: ideas });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ======================
+   MY INTERACTIONS
+   (ALL COMMENTS BY USER)
+====================== */
+
+app.get("/my-interactions/:userId", async (req, res) => {
+  try {
+    const db = await getDB();
+
+    const userId = req.params.userId;
+
+    // সব ideas থেকে comments খুঁজবে যেগুলো user করেছে
+    const ideas = await db.collection("ideas").find({
+      "comments.userId": userId,
+    }).toArray();
+
+    let interactions = [];
+
+    ideas.forEach((idea) => {
+      (idea.comments || []).forEach((c) => {
+        if (c.userId === userId) {
+          interactions.push({
+            ideaId: idea._id.toString(),
+            ideaTitle: idea.title,
+            ideaImage: idea.image,
+            comment: c.text,
+            createdAt: c.createdAt,
+          });
+        }
+      });
+    });
+
+    res.json({
+      success: true,
+      data: interactions,
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+/* ======================
+   USER PROFILE API
+====================== */
+
+app.get("/profile/:userId", async (req, res) => {
+  try {
+    const db = await getDB();
+
+    const userId = new ObjectId(req.params.userId);
+
+    const user = await db.collection("users").findOne({
+      _id: userId,
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: user,
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+app.patch("/profile/:userId", async (req, res) => {
+  try {
+    const db = await getDB();
+
+    const userId = new ObjectId(req.params.userId);
+
+    const result = await db.collection("user").updateOne(
+      { _id: userId },
+      {
+        $set: {
+          name: req.body.name,
+          image: req.body.image,
+        },
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const updatedUser = await db.collection("user").findOne({
+      _id: userId,
+    });
+
+    res.json({
+      success: true,
+      data: updatedUser,
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+/* ======================
    SERVER START
 ====================== */
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(PORT, async () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+
+  // 🔥 force DB connect on startup
+  try {
+    await getDB();
+  } catch (err) {
+    console.log("❌ MongoDB connection failed on startup");
+  }
 });
